@@ -84,28 +84,15 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  // Função para verificar operação ativa antes de navegar
+  // Função para verificar operação ativa antes de navegar - MODIFICADA
   const verificarOperacaoENavegar = (screen) => {
-    // Essas telas precisam de uma operação ativa
-    const telasComOperacao = ['Deslocamento', 'Aguardo', 'Refeicao', 'Abastecimento'];
-
-    if (telasComOperacao.includes(screen)) {
-      if (!operacaoAtiva) {
-        Alert.alert('Erro', 'Não há operação ativa. Inicie uma operação para continuar.');
-        return;
-      }
-    }
-
+    // Removida a verificação de operação ativa
     navigation.navigate(screen);
   };
 
-  // Função para verificar operação ativa (mantida para compatibilidade)
+  // Função para verificar operação ativa (mantida para compatibilidade) - MODIFICADA
   const verificarOperacaoAtiva = () => {
-    if (!operacaoAtiva) {
-      Alert.alert('Erro', 'Não há operação ativa. Inicie uma operação para continuar.');
-      return false;
-    }
-    return true;
+    return true; // Sempre retorna true, ignorando a verificação
   };
 
   if (loading) {

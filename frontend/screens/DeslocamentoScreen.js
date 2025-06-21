@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  TextInput, 
-  TouchableOpacity, 
-  ScrollView, 
-  ActivityIndicator, 
+import {
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
   Alert,
   Modal,
   KeyboardAvoidingView,
@@ -27,22 +27,22 @@ export default function DeslocamentoScreen({ navigation, route }) {
   const [kmInicial, setKmInicial] = useState('');
   const [kmFinal, setKmFinal] = useState('');
   const [observacoes, setObservacoes] = useState('');
-  
+
   // Estados para controle de deslocamento
   const [deslocamentoAtivo, setDeslocamentoAtivo] = useState(false);
   const [deslocamentoId, setDeslocamentoId] = useState(null);
   const [tempoDecorrido, setTempoDecorrido] = useState(0);
   const [horaInicio, setHoraInicio] = useState(null);
-  
+
   // Referência para timer
   const timerRef = useRef(null);
-  
+
   // Função para formatar o tempo (segundos para HH:MM:SS)
   const formatarTempo = (segundos) => {
     const horas = Math.floor(segundos / 3600);
     const minutos = Math.floor((segundos % 3600) / 60);
     const segs = segundos % 60;
-    
+
     return [
       horas.toString().padStart(2, '0'),
       minutos.toString().padStart(2, '0'),
@@ -57,25 +57,25 @@ export default function DeslocamentoScreen({ navigation, route }) {
         setTempoDecorrido(prev => prev + 1);
       }, 1000);
     }
-    
+
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
     };
   }, [deslocamentoAtivo]);
-  
+
   // Verificar se há deslocamento ativo ao entrar na tela
   useEffect(() => {
     verificarDeslocamentoAtivo();
   }, []);
-  
+
   // Função para verificar se há deslocamento ativo
   const verificarDeslocamentoAtivo = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${API_URL}/deslocamentos/ativo`);
-      
+
       if (response.data) {
         const deslocamento = response.data;
         setDeslocamentoAtivo(true);
@@ -84,7 +84,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
         setDestino(deslocamento.destino);
         setKmInicial(deslocamento.km_inicial.toString());
         setObservacoes(deslocamento.observacoes || '');
-        
+
         // Calcular tempo decorrido
         const dataInicio = new Date(deslocamento.hora_inicio);
         setHoraInicio(dataInicio);
@@ -92,7 +92,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
         const segundosDecorridos = Math.floor((agora - dataInicio) / 1000);
         setTempoDecorrido(segundosDecorridos);
       }
-      
+
     } catch (err) {
       // Se não encontrou deslocamento ativo, não é um erro
       if (err.response && err.response.status === 404) {
@@ -105,7 +105,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
       setLoading(false);
     }
   };
-  
+
   // Iniciar deslocamento
   const iniciarDeslocamento = async () => {
     // Validação de campos
@@ -113,75 +113,123 @@ export default function DeslocamentoScreen({ navigation, route }) {
       setError('A origem é obrigatória');
       return;
     }
-    
+
     if (!destino.trim()) {
       setError('O destino é obrigatório');
       return;
     }
-    
+
     if (!kmInicial.trim()) {
       setError('O KM inicial é obrigatório');
       return;
     }
-    
+
     // Validar se KM inicial é um número
     const kmInicialNum = parseFloat(kmInicial);
     if (isNaN(kmInicialNum)) {
       setError('O KM inicial deve ser um número válido');
       return;
     }
-    
+
     try {
       setLoading(true);
       setError(null);
-      
+
+      // Buscar operação ativa antes de criar o deslocamento
+      let operacao_id = null;
+      try {
+        const operacaoRes = await axios.get(`${API_URL}/operacoes/ativa`);
+        if (operacaoRes.data && operacaoRes.data.id) {
+          operacao_id = operacaoRes.data.id;
+        }
+      } catch (opErr) {
+        console.log('Nenhuma operação ativa encontrada');
+        // Se não conseguir encontrar uma operação ativa, podemos criar uma temporária
+        try {
+          const novaOperacao = await axios.post(`${API_URL}/operacoes`, {
+            tipo_operacao: 'LIMPEZA', // Tipo padrão
+            poco: 'Deslocamento sem operação',
+            cidade: 'N/A',
+            observacoes: 'Operação criada automaticamente para permitir deslocamento'
+          });
+
+          if (novaOperacao.data && novaOperacao.data.id) {
+            operacao_id = novaOperacao.data.id;
+            console.log('Operação temporária criada com ID:', operacao_id);
+          }
+        } catch (createErr) {
+          console.error('Não foi possível criar operação temporária:', createErr);
+        }
+      }
+
       const dataDeslocamento = {
         origem,
         destino,
         km_inicial: kmInicialNum,
         observacoes,
         status: 'EM_ANDAMENTO',
-        hora_inicio: new Date().toISOString()
+        hora_inicio: new Date().toISOString(),
+        operacao_id: operacao_id // Incluindo o ID da operação, que pode ser null
       };
-      
+
       console.log('Iniciando deslocamento:', dataDeslocamento);
-      
+
       const response = await axios.post(`${API_URL}/deslocamentos`, dataDeslocamento);
-      
+
       console.log('Deslocamento iniciado:', response.data);
-      
+
       // Atualizar estado
       setDeslocamentoAtivo(true);
       setDeslocamentoId(response.data.id);
       setHoraInicio(new Date());
       setTempoDecorrido(0);
-      
+
       Alert.alert(
         "Deslocamento Iniciado",
         "O deslocamento foi iniciado com sucesso!",
         [{ text: "OK" }]
       );
-      
+
     } catch (err) {
       console.error('Erro ao iniciar deslocamento:', err);
-      
+
       let mensagem = 'Erro ao iniciar deslocamento: ';
-      
+
       if (err.response) {
         const errorDetails = err.response.data?.error || err.message;
+
+        // Se o erro for específico sobre operação ativa
+        if (err.response.status === 400 &&
+          (errorDetails.includes('operação') || errorDetails.includes('operacao'))) {
+
+          Alert.alert(
+            "Operação Necessária",
+            "É necessário ter uma operação ativa para iniciar um deslocamento. Deseja ir para a tela de operações para criar uma?",
+            [
+              { text: "Não", style: "cancel" },
+              {
+                text: "Sim",
+                onPress: () => navigation.navigate('Operacoes')
+              }
+            ]
+          );
+          setLoading(false);
+          return;
+        }
+
         mensagem += `${errorDetails} (${err.response.status})`;
       } else if (err.request) {
         mensagem += 'Sem resposta do servidor';
       } else {
         mensagem += err.message;
       }
-      
+
       setError(mensagem);
     } finally {
       setLoading(false);
     }
   };
-  
+
   // Finalizar deslocamento
   const finalizarDeslocamento = async () => {
     // Validação do KM final
@@ -189,41 +237,41 @@ export default function DeslocamentoScreen({ navigation, route }) {
       setError('O KM final é obrigatório');
       return;
     }
-    
+
     const kmFinalNum = parseFloat(kmFinal);
     if (isNaN(kmFinalNum)) {
       setError('O KM final deve ser um número válido');
       return;
     }
-    
+
     const kmInicialNum = parseFloat(kmInicial);
     if (kmFinalNum < kmInicialNum) {
       setError('O KM final não pode ser menor que o KM inicial');
       return;
     }
-    
+
     try {
       setLoading(true);
       setError(null);
-      
+
       const dataFinalizacao = {
         km_final: kmFinalNum,
         hora_fim: new Date().toISOString(),
         status: 'FINALIZADO',
         tempo_total: tempoDecorrido // em segundos
       };
-      
+
       console.log('Finalizando deslocamento:', dataFinalizacao);
-      
+
       const response = await axios.put(`${API_URL}/deslocamentos/${deslocamentoId}/finalizar`, dataFinalizacao);
-      
+
       console.log('Deslocamento finalizado:', response.data);
-      
+
       // Resetar estados
       setDeslocamentoAtivo(false);
       setDeslocamentoId(null);
       clearInterval(timerRef.current);
-      
+
       // Limpar campos do formulário
       setOrigem('');
       setDestino('');
@@ -231,20 +279,23 @@ export default function DeslocamentoScreen({ navigation, route }) {
       setKmFinal('');
       setObservacoes('');
       setTempoDecorrido(0);
-      
+
       Alert.alert(
         "Deslocamento Finalizado",
         `O deslocamento foi finalizado com sucesso!\n
         Tempo total: ${formatarTempo(tempoDecorrido)}\n
         Distância percorrida: ${(kmFinalNum - kmInicialNum).toFixed(1)} km`,
-        [{ text: "OK", onPress: () => navigation.navigate('Registros') }]
+        [{
+          text: "OK",
+          onPress: () => navigation.goBack() // Volta para a tela anterior
+        }]
       );
-      
+
     } catch (err) {
       console.error('Erro ao finalizar deslocamento:', err);
-      
+
       let mensagem = 'Erro ao finalizar deslocamento: ';
-      
+
       if (err.response) {
         const errorDetails = err.response.data?.error || err.message;
         mensagem += `${errorDetails} (${err.response.status})`;
@@ -253,13 +304,13 @@ export default function DeslocamentoScreen({ navigation, route }) {
       } else {
         mensagem += err.message;
       }
-      
+
       setError(mensagem);
     } finally {
       setLoading(false);
     }
   };
-  
+
   // Cancelar deslocamento (função emergencial)
   const cancelarDeslocamento = async () => {
     Alert.alert(
@@ -267,36 +318,38 @@ export default function DeslocamentoScreen({ navigation, route }) {
       "Tem certeza que deseja cancelar este deslocamento? Esta ação não pode ser desfeita.",
       [
         { text: "Não", style: "cancel" },
-        { text: "Sim", style: "destructive", onPress: async () => {
-          try {
-            setLoading(true);
-            await axios.put(`${API_URL}/deslocamentos/${deslocamentoId}/cancelar`);
-            
-            // Resetar estados
-            setDeslocamentoAtivo(false);
-            setDeslocamentoId(null);
-            clearInterval(timerRef.current);
-            
-            // Limpar campos do formulário
-            setOrigem('');
-            setDestino('');
-            setKmInicial('');
-            setKmFinal('');
-            setObservacoes('');
-            setTempoDecorrido(0);
-            
-            Alert.alert("Deslocamento Cancelado", "O deslocamento foi cancelado com sucesso.");
-          } catch (err) {
-            console.error('Erro ao cancelar deslocamento:', err);
-            setError('Erro ao cancelar deslocamento: ' + err.message);
-          } finally {
-            setLoading(false);
+        {
+          text: "Sim", style: "destructive", onPress: async () => {
+            try {
+              setLoading(true);
+              await axios.put(`${API_URL}/deslocamentos/${deslocamentoId}/cancelar`);
+
+              // Resetar estados
+              setDeslocamentoAtivo(false);
+              setDeslocamentoId(null);
+              clearInterval(timerRef.current);
+
+              // Limpar campos do formulário
+              setOrigem('');
+              setDestino('');
+              setKmInicial('');
+              setKmFinal('');
+              setObservacoes('');
+              setTempoDecorrido(0);
+
+              Alert.alert("Deslocamento Cancelado", "O deslocamento foi cancelado com sucesso.");
+            } catch (err) {
+              console.error('Erro ao cancelar deslocamento:', err);
+              setError('Erro ao cancelar deslocamento: ' + err.message);
+            } finally {
+              setLoading(false);
+            }
           }
-        }}
+        }
       ]
     );
   };
-  
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -309,7 +362,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
             {deslocamentoAtivo ? 'Deslocamento em Andamento' : 'Novo Deslocamento'}
           </Text>
         </View>
-        
+
         {/* Exibir timer quando deslocamento estiver ativo */}
         {deslocamentoAtivo && (
           <View style={styles.timerContainer}>
@@ -317,7 +370,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
             <Text style={styles.timer}>{formatarTempo(tempoDecorrido)}</Text>
           </View>
         )}
-        
+
         {/* Mensagem de erro */}
         {error ? (
           <View style={styles.errorContainer}>
@@ -325,7 +378,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
             <Text style={styles.error}>{error}</Text>
           </View>
         ) : null}
-        
+
         <View style={styles.formContainer}>
           {/* Formulário */}
           <View style={styles.inputGroup}>
@@ -341,7 +394,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
               />
             </View>
           </View>
-          
+
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Destino</Text>
             <View style={styles.inputWrapper}>
@@ -355,7 +408,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
               />
             </View>
           </View>
-          
+
           <View style={styles.row}>
             <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
               <Text style={styles.label}>KM Inicial</Text>
@@ -371,7 +424,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
                 />
               </View>
             </View>
-            
+
             <View style={[styles.inputGroup, { flex: 1 }]}>
               <Text style={styles.label}>KM Final</Text>
               <View style={styles.inputWrapper}>
@@ -387,7 +440,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
               </View>
             </View>
           </View>
-          
+
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Observações (opcional)</Text>
             <View style={[styles.inputWrapper, { height: 100 }]}>
@@ -401,7 +454,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
               />
             </View>
           </View>
-          
+
           {loading ? (
             <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
           ) : (
@@ -425,7 +478,7 @@ export default function DeslocamentoScreen({ navigation, route }) {
                     <Ionicons name="checkmark-circle" size={24} color="#fff" />
                     <Text style={styles.buttonText}>FINALIZAR DESLOCAMENTO</Text>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: '#F44336', marginTop: 10 }]}
                     onPress={cancelarDeslocamento}

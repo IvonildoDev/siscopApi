@@ -135,7 +135,7 @@ function verificarOperacaoAtiva(req, res, next) {
     next();
 }
 
-// Middleware para verificação opcional de operação ativa em abastecimentos
+// Middleware para verificação opcional de operação ativa
 function verificarOperacaoOpcional(req, res, next) {
     // Se existe operação ativa, adiciona ao body
     if (operacaoAtiva) {
@@ -428,7 +428,7 @@ app.get('/operacoes/:id', (req, res) => {
 // ROTAS DE DESLOCAMENTO //
 
 // Rota POST - Iniciar deslocamento
-app.post('/deslocamentos', verificarEquipeAtiva, verificarOperacaoAtiva, deslocamentoValidators, (req, res) => {
+app.post('/deslocamentos', verificarEquipeAtiva, verificarOperacaoOpcional, deslocamentoValidators, (req, res) => {
     // Verificar erros de validação
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -437,8 +437,8 @@ app.post('/deslocamentos', verificarEquipeAtiva, verificarOperacaoAtiva, desloca
 
     // Verificar se já existe um deslocamento em andamento
     connection.query(
-        'SELECT id FROM deslocamentos WHERE status = "EM_ANDAMENTO" AND operacao_id = ?',
-        [operacaoAtiva.id],
+        'SELECT id FROM deslocamentos WHERE status = "EM_ANDAMENTO" AND equipe_id = ?',
+        [equipeAtiva.id],
         (checkErr, checkResults) => {
             if (checkErr) {
                 console.error('Erro ao verificar deslocamentos ativos:', checkErr);
@@ -450,6 +450,9 @@ app.post('/deslocamentos', verificarEquipeAtiva, verificarOperacaoAtiva, desloca
             }
 
             const { origem, destino, km_inicial, observacoes } = req.body;
+            // Usar operacao_id do req.body ou da operacaoAtiva, ou null
+            const operacao_id = req.body.operacao_id || (req.operacaoAtiva ? req.operacaoAtiva.id : null);
+
             const query = `
                 INSERT INTO deslocamentos 
                 (equipe_id, operacao_id, origem, destino, km_inicial, observacoes) 
@@ -458,7 +461,7 @@ app.post('/deslocamentos', verificarEquipeAtiva, verificarOperacaoAtiva, desloca
 
             connection.query(
                 query,
-                [equipeAtiva.id, operacaoAtiva.id, origem, destino, km_inicial, observacoes],
+                [equipeAtiva.id, operacao_id, origem, destino, km_inicial, observacoes],
                 (err, result) => {
                     if (err) {
                         console.error('Erro ao adicionar deslocamento:', err);

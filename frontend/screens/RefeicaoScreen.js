@@ -9,7 +9,8 @@ import {
     FlatList,
     Platform,
     Modal,
-    Image
+    Image,
+    TextInput
 } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,9 @@ export default function RefeicaoScreen({ navigation }) {
     // Estados para relatório
     const [relatorioModalVisivel, setRelatorioModalVisivel] = useState(false);
     const [relatorioAtual, setRelatorioAtual] = useState(null);
+
+    // Adicione esse estado no início do componente
+    const [observacoes, setObservacoes] = useState('');
 
     // Carregar dados iniciais
     useEffect(() => {
@@ -156,38 +160,54 @@ export default function RefeicaoScreen({ navigation }) {
         }
     };
 
-    // Finalizar refeição
+    // Função finalizar refeição com correção
     const finalizarRefeicao = async () => {
-        if (!refeicaoAtiva) {
-            Alert.alert('Erro', 'Não há refeição ativa para finalizar.');
-            return;
-        }
-
         try {
             setLoading(true);
             setError(null);
 
-            const dataFim = new Date().toISOString();
-
-            const response = await axios.put(`${API_URL}/refeicoes/${refeicaoAtiva.id}/finalizar`, {
-                fim_refeicao: dataFim,
-                tempo_refeicao: tempoRefeicao
-            });
-
-            if (response.data) {
-                setRelatorioAtual({
-                    ...response.data,
-                    inicioFormatado: formatarData(response.data.inicio_refeicao),
-                    fimFormatado: formatarData(response.data.fim_refeicao),
-                    tempoFormatado: formatarTempo(response.data.tempo_refeicao)
-                });
-
-                setRefeicaoAtiva(null);
-                buscarRefeicoes();
-
-                // Mostrar relatório
-                setRelatorioModalVisivel(true);
+            if (!refeicaoAtiva || !refeicaoAtiva.id) {
+                setError('Nenhuma refeição ativa encontrada');
+                return;
             }
+
+            // Proteção extra contra erros de 'trim'
+            let observacoesTexto = '';
+            try {
+                observacoesTexto = observacoes ? observacoes.trim() : '';
+            } catch (e) {
+                console.error('Erro ao processar observações:', e);
+                observacoesTexto = '';
+            }
+
+            // Criar payload sem usar trim diretamente
+            const payload = {};
+            if (observacoesTexto && observacoesTexto.length > 0) {
+                payload.observacoes = observacoesTexto;
+            }
+
+            console.log(`Finalizando refeição ${refeicaoAtiva.id} com payload:`, payload);
+
+            const response = await axios.put(
+                `${API_URL}/refeicoes/${refeicaoAtiva.id}/finalizar`,
+                payload
+            );
+
+            console.log('Resposta da API ao finalizar refeição:', response.data);
+
+            // Atualizar estados - aqui está a correção
+            setRefeicaoAtiva(null);
+            setTempoRefeicao(0); // Use setTempoRefeicao em vez de setTempoDecorrido
+
+            // Mostrar o tempo de refeição ao usuário
+            Alert.alert(
+                "Refeição Finalizada",
+                `A refeição foi finalizada com sucesso!\nTempo total: ${formatarTempo(response.data.tempo_refeicao || 0)}`,
+                [{ text: "OK", onPress: () => navigation.navigate('Home') }]
+            );
+
+            // Atualizar a lista após finalizar
+            await buscarRefeicoes();
         } catch (err) {
             console.error('Erro ao finalizar refeição:', err);
             setError('Erro ao finalizar refeição');
@@ -266,8 +286,8 @@ export default function RefeicaoScreen({ navigation }) {
             {/* Refeição ativa com timer */}
             {refeicaoAtiva && (
                 <View style={styles.refeicaoAtivaCard}>
-                    <Text style={styles.refeicaoAtivoTitle}>
-                        Horário de Refeição em andamento
+                    <Text style={styles.refeicaoAtivaTitle}>
+                        Refeição em andamento
                     </Text>
 
                     <View style={styles.iconContainer}>
@@ -284,6 +304,16 @@ export default function RefeicaoScreen({ navigation }) {
                     <Text style={styles.refeicaoAtivaInicio}>
                         Iniciado em: {formatarData(refeicaoAtiva.inicio_refeicao)}
                     </Text>
+
+                    {/* Campo de observações para finalização da refeição */}
+                    <TextInput
+                        style={styles.observacoesInput}
+                        placeholder="Observações (opcional)"
+                        value={observacoes}
+                        onChangeText={setObservacoes}
+                        multiline={true}
+                        numberOfLines={2}
+                    />
 
                     <TouchableOpacity
                         style={styles.finalizarButton}
@@ -345,7 +375,8 @@ export default function RefeicaoScreen({ navigation }) {
                                 </View>
 
                                 <Text style={styles.refeicaoItemHorario}>
-                                    {formatarData(item.inicio_refeicao).split(',')[1].trim()} - {formatarData(item.fim_refeicao).split(',')[1].trim()}
+                                    {formatarData(item.inicio_refeicao).split(',')[1]?.trim() || formatarData(item.inicio_refeicao)} -
+                                    {formatarData(item.fim_refeicao).split(',')[1]?.trim() || formatarData(item.fim_refeicao)}
                                 </Text>
                             </TouchableOpacity>
                         )}
@@ -503,7 +534,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#FFCDD2',
     },
-    refeicaoAtivoTitle: {
+    refeicaoAtivaTitle: {
         fontSize: 16,
         fontWeight: '500',
         color: '#C62828',
@@ -791,5 +822,14 @@ const styles = StyleSheet.create({
     modalConfirmButtonText: {
         color: '#fff',
         fontWeight: 'bold',
+    },
+    observacoesInput: {
+        borderWidth: 1,
+        borderColor: '#ddd',
+        borderRadius: 8,
+        padding: 10,
+        marginVertical: 10,
+        width: '100%',
+        backgroundColor: '#fff',
     },
 });

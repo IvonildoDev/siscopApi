@@ -34,6 +34,9 @@ export default function AguardoScreen({ navigation, route }) {
   const [tempoAguardo, setTempoAguardo] = useState(0);
   const timerAguardo = useRef(null);
 
+  // Adicione este estado para armazenar as observações
+  const [observacoes, setObservacoes] = useState('');
+
   // Buscar operação ativa e aguardos ao carregar a tela
   useEffect(() => {
     buscarOperacaoAtiva();
@@ -173,28 +176,81 @@ export default function AguardoScreen({ navigation, route }) {
     }
   };
 
-  // Função para finalizar aguardo
+  // Função para finalizar aguardo - adicionar ou modificar para melhor tratamento de erros
   const finalizarAguardo = async () => {
-    if (!aguardoAtivo) {
-      return;
-    }
-
     try {
       setLoading(true);
-      await axios.put(`${API_URL}/aguardos/${aguardoAtivo.id}/finalizar`);
+      setError(null);
 
-      // Limpar timer
-      if (timerAguardo.current) {  // CORREÇÃO AQUI: timerAguardo em vez de timerRef
-        clearInterval(timerAguardo.current);
+      if (!aguardoAtivo || !aguardoAtivo.id) {
+        setError('Nenhum aguardo ativo encontrado');
+        return;
       }
 
-      // Recarregar dados
-      await buscarAguardos();  // CORREÇÃO: Removemos a chamada para buscarAguardoAtivo
+      // Verificar se observações é undefined e passar um objeto vazio se for o caso
+      const payload = {};
+      if (observacoes && observacoes.trim()) {
+        payload.observacoes = observacoes;
+      }
 
-      Alert.alert('Sucesso', 'Aguardo finalizado com sucesso!');
+      console.log(`Finalizando aguardo ${aguardoAtivo.id} com payload:`, payload);
+
+      const response = await axios.put(
+        `${API_URL}/aguardos/${aguardoAtivo.id}/finalizar`,
+        payload
+      );
+
+      console.log('Resposta da API ao finalizar aguardo:', response.data);
+
+      // Atualizar estados
+      setAguardoAtivo(null);
+      setTempoAguardo(0);
+
+      // Mostrar o tempo de aguardo ao usuário
+      Alert.alert(
+        "Aguardo Finalizado",
+        `O aguardo foi finalizado com sucesso!\nTempo total: ${formatarTempo(response.data.tempo_aguardo || 0)}`,
+        [{ text: "OK", onPress: () => navigation.navigate('Home') }]
+      );
+
+      // Atualizar a lista após finalizar
+      await buscarAguardos();
+
     } catch (err) {
-      console.error('Erro ao finalizar aguardo:', err);
-      Alert.alert('Erro', err.response?.data?.error || 'Não foi possível finalizar o aguardo.');
+      console.error('Erro completo ao finalizar aguardo:', JSON.stringify(err, null, 2));
+      let mensagemErro = 'Erro ao finalizar aguardo';
+
+      if (err.response) {
+        // O servidor retornou um código de status diferente de 2xx
+        console.error(`Erro ${err.response.status} ao finalizar aguardo:`, err.response.data);
+
+        if (err.response.data && err.response.data.error) {
+          mensagemErro += `: ${err.response.data.error}`;
+        } else {
+          mensagemErro += ` (Código: ${err.response.status})`;
+        }
+
+        // Para erro 500, adicione mais detalhes
+        if (err.response.status === 500) {
+          mensagemErro += '. Erro interno do servidor. Tente novamente em alguns instantes ou contate o suporte.';
+        }
+      } else if (err.request) {
+        // A requisição foi feita mas não houve resposta
+        console.error('Sem resposta do servidor ao finalizar aguardo:', err.request);
+        mensagemErro += ': Sem resposta do servidor. Verifique sua conexão.';
+      } else {
+        // Erro na configuração da requisição
+        console.error('Erro ao configurar requisição:', err.message);
+        mensagemErro += `: ${err.message}`;
+      }
+
+      setError(mensagemErro);
+
+      Alert.alert(
+        "Erro",
+        mensagemErro,
+        [{ text: "OK" }]
+      );
     } finally {
       setLoading(false);
     }
@@ -280,6 +336,17 @@ export default function AguardoScreen({ navigation, route }) {
           <Text style={styles.aguardoAtivoInicio}>
             Iniciado em: {formatarData(aguardoAtivo.inicio_aguardo)}
           </Text>
+
+          {/* Campo de observações para finalização do aguardo */}
+          <TextInput
+            style={styles.observacoesInput}
+            placeholder="Observações (opcional)"
+            value={observacoes}
+            onChangeText={setObservacoes}
+            multiline={true}
+            numberOfLines={2}
+          />
+
           <TouchableOpacity
             style={styles.finalizarButton}
             onPress={finalizarAguardo}
@@ -366,14 +433,14 @@ export default function AguardoScreen({ navigation, route }) {
                 style={[styles.modalButton, styles.modalButtonCancel]}
                 onPress={() => setModalVisivel(false)}
               >
-                <Text style={styles.modalCancelButtonText}>Cancelar</Text>
+                <Text style={styles.modalButtonCancelText}>Cancelar</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm]}
                 onPress={confirmarAguardo}
               >
-                <Text style={styles.modalConfirmButtonText}>Confirmar</Text>
+                <Text style={styles.modalButtonConfirmText}>Confirmar</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -678,5 +745,51 @@ const styles = StyleSheet.create({
     color: '#D32F2F',
     marginLeft: 10,
     flex: 1,
+  },
+  observacoesInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 10,
+    marginVertical: 10,
+    width: '100%',
+    backgroundColor: '#fff',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 20,
+    textAlignVertical: 'top',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 46,
+  },
+  modalButtonCancel: {
+    backgroundColor: '#f0f0f0',
+    marginRight: 5,
+  },
+  modalButtonConfirm: {
+    backgroundColor: '#FF9800',
+    marginLeft: 5,
+  },
+  modalButtonCancelText: {
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  modalButtonConfirmText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 });

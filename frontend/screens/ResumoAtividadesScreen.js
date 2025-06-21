@@ -87,7 +87,8 @@ export default function ResumoAtividadesScreen({ navigation }) {
 
             // Formatar e combinar as atividades
             const todasAtividades = [
-                ...operacoesRes.data.map(op => ({
+                // Verifique se operacoesRes.data contém uma propriedade 'data' (paginação)
+                ...(operacoesRes.data && operacoesRes.data.data ? operacoesRes.data.data : operacoesRes.data || []).map(op => ({
                     ...op,
                     tipo: 'operacao',
                     data: new Date(op.criado_em),
@@ -99,7 +100,8 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     cor: '#4CAF50',
                     tempo: op.tempo_operacao
                 })),
-                ...deslocamentosRes.data.map(des => ({
+                // Aplique a mesma lógica para os outros endpoints
+                ...(deslocamentosRes.data && deslocamentosRes.data.data ? deslocamentosRes.data.data : deslocamentosRes.data || []).map(des => ({
                     ...des,
                     tipo: 'deslocamento',
                     data: new Date(des.hora_inicio),
@@ -111,7 +113,7 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     cor: '#2196F3',
                     tempo: des.tempo_total
                 })),
-                ...aguardosRes.data.map(ag => ({
+                ...(aguardosRes.data && aguardosRes.data.data ? aguardosRes.data.data : aguardosRes.data || []).map(ag => ({
                     ...ag,
                     tipo: 'aguardo',
                     data: new Date(ag.inicio_aguardo),
@@ -123,7 +125,7 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     cor: '#FFC107',
                     tempo: ag.tempo_aguardo
                 })),
-                ...refeicoesRes.data.map(ref => ({
+                ...(refeicoesRes.data && refeicoesRes.data.data ? refeicoesRes.data.data : refeicoesRes.data || []).map(ref => ({
                     ...ref,
                     tipo: 'refeicao',
                     data: new Date(ref.inicio_refeicao),
@@ -135,7 +137,7 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     cor: '#F44336',
                     tempo: ref.tempo_refeicao
                 })),
-                ...abastecimentosRes.data.map(ab => ({
+                ...(abastecimentosRes.data && abastecimentosRes.data.data ? abastecimentosRes.data.data : abastecimentosRes.data || []).map(ab => ({
                     ...ab,
                     tipo: 'abastecimento',
                     data: new Date(ab.inicio_abastecimento),

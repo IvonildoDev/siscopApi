@@ -97,7 +97,7 @@ export default function CadastroEquipeScreen({ navigation }) {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
-        <Ionicons name="people" size={40} color="#4CAF50" />
+        <Ionicons name="people" size={30} color="#4CAF50" />
         <Text style={styles.headerText}>Cadastro de Equipe</Text>
       </View>
 
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 30,
-    marginTop: 10,
+    marginTop: 1,
   },
   headerText: {
     fontSize: 24,
@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 5,
   },
   label: {
     fontSize: 16,

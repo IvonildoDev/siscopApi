@@ -140,3 +140,10 @@ export default function App() {
     </NavigationContainer>
   );
 }
+
+// Adicione isso no seu arquivo index.js ou App.js principal
+if (!String.prototype.safeTrim) {
+  String.prototype.safeTrim = function () {
+    return this ? this.trim() : '';
+  };
+}
