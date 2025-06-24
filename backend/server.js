@@ -549,21 +549,27 @@ app.get('/operacoes/:id', (req, res) => {
 app.get('/operacoes/:id/resumo', async (req, res) => {
     const operacao_id = req.params.id;
 
-    // Exemplo usando callbacks aninhados, mas pode ser melhor com async/await e Promises
     connection.query('SELECT * FROM operacoes WHERE id = ?', [operacao_id], (err, operacaoResults) => {
         if (err || operacaoResults.length === 0) {
             return res.status(404).json({ error: 'Operação não encontrada' });
         }
         const operacao = operacaoResults[0];
 
+        // Buscar todas as etapas relacionadas
         connection.query('SELECT * FROM mobilizacoes WHERE operacao_id = ?', [operacao_id], (err, mobilizacoes) => {
             connection.query('SELECT * FROM desmobilizacoes WHERE operacao_id = ?', [operacao_id], (err, desmobilizacoes) => {
-                // ... repita para outras etapas ...
+                // Aqui você pode buscar outras etapas, como deslocamentos, aguardos, etc.
+
+                // Juntar todas as atividades em um único array
+                const atividades = [
+                    ...mobilizacoes.map(m => ({ tipo: 'mobilizacao', ...m })),
+                    ...desmobilizacoes.map(d => ({ tipo: 'desmobilizacao', ...d })),
+                    // ...adicione outros tipos aqui se quiser...
+                ];
+
                 res.json({
                     operacao,
-                    mobilizacoes,
-                    desmobilizacoes,
-                    // ...outras etapas...
+                    atividades
                 });
             });
         });
@@ -1415,18 +1421,30 @@ app.get('/abastecimentos/:id', (req, res) => {
 
 // POST - Salvar mobilização
 app.post('/mobilizacoes', verificarEquipeAtiva, (req, res) => {
-    const { operacao_id, data_inicio, data_fim, observacoes } = req.body;
+    const { operacao_id, equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes } = req.body;
     const query = `
-        INSERT INTO mobilizacoes (operacao_id, data_inicio, data_fim, observacoes)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO mobilizacoes 
+        (operacao_id, equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes)
+        VALUES (?, ?, ?, ?, ?, ?)
     `;
-    connection.query(query, [operacao_id, data_inicio, data_fim, observacoes], (err, result) => {
-        if (err) {
-            console.error('Erro ao salvar mobilização:', err);
-            return res.status(500).json({ error: 'Erro ao salvar mobilização' });
+    connection.query(
+        query,
+        [
+            operacao_id,
+            equipe_id,
+            hora_inicio_mobilizacao,
+            hora_fim_mobilizacao,
+            tempo_mobilizacao,
+            observacoes
+        ],
+        (err, result) => {
+            if (err) {
+                console.error('Erro ao salvar mobilização:', err);
+                return res.status(500).json({ error: 'Erro ao salvar mobilização' });
+            }
+            res.status(201).json({ id: result.insertId, operacao_id, equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes });
         }
-        res.status(201).json({ id: result.insertId, operacao_id, data_inicio, data_fim, observacoes });
-    });
+    );
 });
 
 // GET - Buscar mobilizações por operação
@@ -1442,6 +1460,52 @@ app.get('/mobilizacoes', (req, res) => {
         if (err) {
             console.error('Erro ao buscar mobilizações:', err);
             return res.status(500).json({ error: 'Erro ao buscar mobilizações' });
+        }
+        res.json(results);
+    });
+});
+
+// POST - Salvar desmobilização
+app.post('/desmobilizacoes', verificarEquipeAtiva, (req, res) => {
+    const { operacao_id, equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes } = req.body;
+    const query = `
+        INSERT INTO desmobilizacoes 
+        (operacao_id, equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    `;
+    connection.query(
+        query,
+        [
+            operacao_id,
+            equipe_id,
+            hora_inicio_desmobilizacao,
+            hora_fim_desmobilizacao,
+            tempo_desmobilizacao,
+            observacoes
+        ],
+        (err, result) => {
+            if (err) {
+                console.error('Erro ao salvar desmobilização:', err);
+                return res.status(500).json({ error: 'Erro ao salvar desmobilização' });
+            }
+            res.status(201).json({ id: result.insertId, operacao_id, equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes });
+        }
+    );
+});
+
+// GET - Buscar desmobilizações por operação
+app.get('/desmobilizacoes', (req, res) => {
+    const { operacao_id } = req.query;
+    let query = 'SELECT * FROM desmobilizacoes';
+    let params = [];
+    if (operacao_id) {
+        query += ' WHERE operacao_id = ?';
+        params.push(operacao_id);
+    }
+    connection.query(query, params, (err, results) => {
+        if (err) {
+            console.error('Erro ao buscar desmobilizações:', err);
+            return res.status(500).json({ error: 'Erro ao buscar desmobilizações' });
         }
         res.json(results);
     });

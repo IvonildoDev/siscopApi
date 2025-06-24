@@ -80,13 +80,22 @@ export default function ResumoAtividadesScreen({ navigation }) {
             setLoading(true);
             setError(null);
 
-            // Buscar todas as atividades concatenadas
-            const [operacoesRes, deslocamentosRes, aguardosRes, refeicoesRes, abastecimentosRes] = await Promise.all([
-                axios.get(`${API_URL}/operacoes`),
-                axios.get(`${API_URL}/deslocamentos`),
-                axios.get(`${API_URL}/aguardos`),
-                axios.get(`${API_URL}/refeicoes`),
-                axios.get(`${API_URL}/abastecimentos`)
+            const [
+                operacoesRes,
+                deslocamentosRes,
+                aguardosRes,
+                refeicoesRes,
+                abastecimentosRes,
+                mobilizacoesRes,
+                desmobilizacoesRes
+            ] = await Promise.all([
+                axios.get(`${API_URL}/operacoes`).catch(err => (err.response && err.response.status === 404 ? { data: [] } : Promise.reject(err))),
+                axios.get(`${API_URL}/deslocamentos`).catch(err => (err.response && err.response.status === 404 ? { data: [] } : Promise.reject(err))),
+                axios.get(`${API_URL}/aguardos`).catch(err => (err.response && err.response.status === 404 ? { data: [] } : Promise.reject(err))),
+                axios.get(`${API_URL}/refeicoes`).catch(err => (err.response && err.response.status === 404 ? { data: [] } : Promise.reject(err))),
+                axios.get(`${API_URL}/abastecimentos`).catch(err => (err.response && err.response.status === 404 ? { data: [] } : Promise.reject(err))),
+                axios.get(`${API_URL}/mobilizacoes`).catch(err => (err.response && err.response.status === 404 ? { data: [] } : Promise.reject(err))),
+                axios.get(`${API_URL}/desmobilizacoes`).catch(err => (err.response && err.response.status === 404 ? { data: [] } : Promise.reject(err))),
             ]);
 
             // Formatar e combinar as atividades
@@ -152,6 +161,30 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     icone: ab.tipo_abastecimento === 'AGUA' ? 'water' : 'flame',
                     cor: ab.tipo_abastecimento === 'AGUA' ? '#2196F3' : '#FF9800',
                     tempo: ab.tempo_abastecimento
+                })),
+                ...(mobilizacoesRes.data || []).map(mob => ({
+                    ...mob,
+                    tipo: 'mobilizacao',
+                    data: new Date(mob.data_inicio),
+                    dataString: new Date(mob.data_inicio).toLocaleDateString(),
+                    titulo: `Mobilização`,
+                    descricao: mob.observacoes || '',
+                    status: mob.data_fim ? 'FINALIZADO' : 'EM_ANDAMENTO',
+                    icone: 'construct',
+                    cor: '#1976D2',
+                    tempo: mob.data_fim && mob.data_inicio ? Math.floor((new Date(mob.data_fim) - new Date(mob.data_inicio)) / 1000) : 0
+                })),
+                ...(desmobilizacoesRes.data || []).map(desm => ({
+                    ...desm,
+                    tipo: 'desmobilizacao',
+                    data: new Date(desm.data_inicio),
+                    dataString: new Date(desm.data_inicio).toLocaleDateString(),
+                    titulo: `Desmobilização`,
+                    descricao: desm.observacoes || '',
+                    status: desm.data_fim ? 'FINALIZADO' : 'EM_ANDAMENTO',
+                    icone: 'exit',
+                    cor: '#E65100',
+                    tempo: desm.data_fim && desm.data_inicio ? Math.floor((new Date(desm.data_fim) - new Date(desm.data_inicio)) / 1000) : 0
                 }))
             ];
 
@@ -159,8 +192,12 @@ export default function ResumoAtividadesScreen({ navigation }) {
             todasAtividades.sort((a, b) => b.data - a.data);
             setAtividades(todasAtividades);
         } catch (err) {
-            console.error('Erro ao buscar atividades:', err);
-            setError('Não foi possível carregar as atividades');
+            // Só exibe erro se não for 404
+            if (!(err.response && err.response.status === 404)) {
+                console.error('Erro ao buscar atividades:', err);
+                setError('Não foi possível carregar as atividades');
+            }
+            setAtividades([]); // Limpa atividades se erro
         } finally {
             setLoading(false);
         }
@@ -345,6 +382,8 @@ export default function ResumoAtividadesScreen({ navigation }) {
             const aguardos = atividadesParaRelatorio.filter(a => a.tipo === 'aguardo');
             const refeicoes = atividadesParaRelatorio.filter(a => a.tipo === 'refeicao');
             const abastecimentos = atividadesParaRelatorio.filter(a => a.tipo === 'abastecimento');
+            const mobilizacoes = atividadesParaRelatorio.filter(a => a.tipo === 'mobilizacao');
+            const desmobilizacoes = atividadesParaRelatorio.filter(a => a.tipo === 'desmobilizacao');
 
             // Calcular totais
             const totalOperacoes = operacoes.length;
@@ -371,33 +410,30 @@ export default function ResumoAtividadesScreen({ navigation }) {
                 ? `Relatório de Atividades - ${dataFiltro.toLocaleDateString()}`
                 : 'Relatório Geral de Atividades';
 
-            // Função para gerar tabela de atividades
+            // Função para gerar tabela de atividades com hora início/fim
             const gerarTabelaAtividades = (atividades, tipoNome) => {
                 if (atividades.length === 0) return `<p>Nenhum(a) ${tipoNome} registrado(a).</p>`;
 
-                // Verificar se é tabela de operações (para ocultar coluna de tempo)
-                const mostrarTempo = tipoNome !== 'operação';
-
-                // Função para adicionar informações extras específicas para cada tipo
-                const gerarInfoExtra = (atividade) => {
-                    if (atividade.tipo === 'deslocamento') {
-                        return `
-                        <div class="info-extra">
-                            <div class="info-item">
-                                <span class="info-label">KM Inicial:</span> 
-                                <span class="info-value">${atividade.km_inicial || 'N/A'}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">KM Final:</span> 
-                                <span class="info-value">${atividade.km_final || 'N/A'}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">Distância:</span> 
-                                <span class="info-value">${atividade.km_final ? (atividade.km_final - atividade.km_inicial).toFixed(1) : 'N/A'} km</span>
-                            </div>
-                        </div>`;
+                // Define os campos de início e fim conforme o tipo
+                const getInicioFim = (a) => {
+                    switch (a.tipo) {
+                        case 'operacao':
+                            return { inicio: a.criado_em, fim: a.finalizado_em };
+                        case 'deslocamento':
+                            return { inicio: a.hora_inicio, fim: a.hora_fim };
+                        case 'aguardo':
+                            return { inicio: a.inicio_aguardo, fim: a.fim_aguardo };
+                        case 'refeicao':
+                            return { inicio: a.inicio_refeicao, fim: a.fim_refeicao };
+                        case 'abastecimento':
+                            return { inicio: a.inicio_abastecimento, fim: a.fim_abastecimento };
+                        case 'mobilizacao':
+                            return { inicio: a.hora_inicio, fim: a.hora_fim };
+                        case 'desmobilizacao':
+                            return { inicio: a.hora_inicio, fim: a.hora_fim };
+                        default:
+                            return { inicio: a.data, fim: null };
                     }
-                    return '';
                 };
 
                 return `
@@ -405,26 +441,30 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     <table class="tabela-atividades">
                         <thead>
                             <tr>
-                                <th>Data/Hora</th>
+                                <th>Início</th>
+                                <th>Fim</th>
                                 <th>Descrição</th>
                                 <th>Status</th>
-                                ${mostrarTempo ? '<th>Tempo</th>' : ''}
+                                <th>Tempo</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${atividades.map(a => `
-                                <tr>
-                                    <td>${new Date(a.data).toLocaleString()}</td>
-                                    <td>
-                                        <strong>${a.titulo}</strong>
-                                        <div class="descricao">${a.descricao}</div>
-                                        ${gerarInfoExtra(a)}
-                                    </td>
-                                    <td>${a.status === 'EM_ANDAMENTO' ? 'Em andamento' :
-                        a.status === 'FINALIZADO' ? 'Finalizado' : a.status}</td>
-                                    ${mostrarTempo ? `<td>${formatarTempo(a.tempo || 0)}</td>` : ''}
-                                </tr>
-                            `).join('')}
+                            ${atividades.map(a => {
+                                const { inicio, fim } = getInicioFim(a);
+                                return `
+                                    <tr>
+                                        <td>${inicio ? new Date(inicio).toLocaleString() : '-'}</td>
+                                        <td>${fim ? new Date(fim).toLocaleString() : '-'}</td>
+                                        <td>
+                                            <strong>${a.titulo}</strong>
+                                            <div class="descricao">${a.descricao}</div>
+                                        </td>
+                                        <td>${a.status === 'EM_ANDAMENTO' ? 'Em andamento' :
+                                            a.status === 'FINALIZADO' ? 'Finalizado' : a.status}</td>
+                                        <td>${a.tempo ? formatarTempo(a.tempo) : '-'}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>`;
@@ -651,7 +691,7 @@ export default function ResumoAtividadesScreen({ navigation }) {
                   
                   <div class="secao">
                     <h2>Deslocamentos</h2>
-                    ${gerarTabelaDeslocamentos(deslocamentos)}
+                    ${gerarTabelaAtividades(deslocamentos, 'deslocamento')}
                   </div>
                   
                   <div class="secao">
@@ -667,6 +707,15 @@ export default function ResumoAtividadesScreen({ navigation }) {
                   <div class="secao">
                     <h2>Abastecimentos</h2>
                     ${gerarTabelaAtividades(abastecimentos, 'abastecimento')}
+                  </div>
+                  
+                  <div class="secao">
+                    <h2>Mobilizações</h2>
+                    ${gerarTabelaAtividades(mobilizacoes, 'mobilização')}
+                  </div>
+                  <div class="secao">
+                    <h2>Desmobilizações</h2>
+                    ${gerarTabelaAtividades(desmobilizacoes, 'desmobilização')}
                   </div>
                   
                   <div class="footer">

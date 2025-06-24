@@ -97,8 +97,8 @@ export default function App() {
             }
             return <TabBarLabel focused={focused} color={color}>{label}</TabBarLabel>;
           },
-          tabBarActiveTintColor: '#4CAF50',
-          tabBarInactiveTintColor: 'gray',
+          tabBarActiveTintColor: '#FF9800', // ou '#fff'
+          tabBarInactiveTintColor: '#bbb',
           headerShown: true,
           // Estilo personalizado para toda a barra
           tabBarStyle: {
@@ -106,8 +106,8 @@ export default function App() {
             paddingTop: 8,
             paddingBottom: 8,
             borderTopWidth: 1,
-            borderTopColor: '#eee',
-            backgroundColor: '#fff',
+            borderTopColor: '#111', // linha superior mais escura
+            backgroundColor: '#222', // <-- cor escura para a tab bar
             // Distribuição uniforme em toda a largura da tela
             paddingHorizontal: 0,
             justifyContent: 'space-between',

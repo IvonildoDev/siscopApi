@@ -10,7 +10,8 @@ import {
     Alert,
     Platform,
     KeyboardAvoidingView,
-    Switch
+    Switch,
+    Modal
 } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +47,14 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
 
     // Referência para o timer
     const timerRef = useRef(null);
+
+    // Estados para modal e controle de tempo
+    const [modalVisible, setModalVisible] = useState(false);
+    const [modalTipo, setModalTipo] = useState('mobilizacao'); // ou 'desmobilizacao'
+    const [atividadeIniciada, setAtividadeIniciada] = useState(false);
+    const [inicioAtividade, setInicioAtividade] = useState(null);
+    const [fimAtividade, setFimAtividade] = useState(null);
+    const [duracaoAtividade, setDuracaoAtividade] = useState(null);
 
     // Formatador de tempo
     const formatarTempo = (segundos) => {
@@ -174,13 +183,19 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
     const iniciarMobilizacao = async () => {
         setLoading(true);
         try {
-            const data = {
-                inicio_mobilizacao: new Date().toISOString(),
-                status: 'MOBILIZACAO',
-                // outros campos se necessário
-            };
-            await axios.post(`${API_URL}/mobilizacoes`, data); // endpoint só de mobilização
-            // Atualize o estado local se necessário
+            if (!operacaoAtiva || !operacaoAtiva.id || !operacaoAtiva.equipe_id) {
+                setError('Operação ou equipe não encontrada');
+                setLoading(false);
+                return;
+            }
+            await axios.post(`${API_URL}/mobilizacoes`, {
+                operacao_id: operacaoAtiva.id,
+                equipe_id: operacaoAtiva.equipe_id,
+                hora_inicio_mobilizacao: new Date().toISOString(),
+                hora_fim_mobilizacao: null,
+                tempo_mobilizacao: null,
+                observacoes: observacoesMobilizacao || ''
+            });
             Alert.alert('Mobilização iniciada!');
         } catch (err) {
             setError('Erro ao iniciar mobilização');
@@ -220,8 +235,9 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
             setLoading(true);
             setError(null);
 
-            if (!operacaoAtiva || !operacaoAtiva.id) {
-                setError('Operação não encontrada');
+            if (!operacaoAtiva || !operacaoAtiva.id || !operacaoAtiva.equipe_id) {
+                setError('Operação ou equipe não encontrada');
+                setLoading(false);
                 return;
             }
 
@@ -233,10 +249,18 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
 
             await axios.put(`${API_URL}/operacoes/${operacaoAtiva.id}`, dataOperacao);
 
-            // Atualizar estado
             setEtapaAtual('DESMOBILIZACAO');
             setInicioDesmobilizacao(new Date());
             setTempoDesmobilizacao(0);
+
+            await axios.post(`${API_URL}/desmobilizacoes`, {
+                operacao_id: operacaoAtiva.id,
+                equipe_id: operacaoAtiva.equipe_id,
+                hora_inicio_desmobilizacao: new Date().toISOString(),
+                hora_fim_desmobilizacao: null,
+                tempo_desmobilizacao: null,
+                observacoes: observacoesDesmobilizacao || ''
+            });
 
             Alert.alert('Desmobilização Iniciada', 'A equipe está realizando a desmobilização do equipamento.');
         } catch (err) {
@@ -274,7 +298,18 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
                 km_final_desmobilizacao: parseFloat(kmFinal)
             };
 
+            // Atualiza a operação
             await axios.put(`${API_URL}/operacoes/${operacaoAtiva.id}`, dataOperacao);
+
+            // SALVA a desmobilização na tabela desmobilizacoes
+            await axios.post(`${API_URL}/desmobilizacoes`, {
+                operacao_id: operacaoAtiva.id,
+                equipe_id: operacaoAtiva.equipe_id,
+                hora_inicio_desmobilizacao: inicioDesmobilizacao ? inicioDesmobilizacao.toISOString() : new Date().toISOString(),
+                hora_fim_desmobilizacao: new Date().toISOString(),
+                tempo_desmobilizacao: tempoDesmobilizacao,
+                observacoes: observacoesDesmobilizacao
+            });
 
             // Atualizar estado
             setEtapaAtual('FINALIZADO');
@@ -356,13 +391,12 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
                     styles.seletorTab,
                     tipoEtapa === 'mobilizacao' ? styles.seletorTabAtiva : {}
                 ]}
-                onPress={() => setTipoEtapa('mobilizacao')}
-                disabled={loading}
+                onPress={() => abrirModal('mobilizacao')}
             >
                 <Ionicons
                     name="construct"
                     size={24}
-                    color={tipoEtapa === 'mobilizacao' ? '#FF9800' : '#757575'}
+                    color="#FF9800"
                 />
                 <Text style={[
                     styles.seletorTabText,
@@ -375,13 +409,12 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
                     styles.seletorTab,
                     tipoEtapa === 'desmobilizacao' ? styles.seletorTabAtiva : {}
                 ]}
-                onPress={() => setTipoEtapa('desmobilizacao')}
-                disabled={loading}
+                onPress={() => abrirModal('desmobilizacao')}
             >
                 <Ionicons
                     name="exit-outline"
                     size={24}
-                    color={tipoEtapa === 'desmobilizacao' ? '#9C27B0' : '#757575'}
+                    color="#9C27B0"
                 />
                 <Text style={[
                     styles.seletorTabText,
@@ -391,408 +424,49 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
         </View>
     );
 
-    // Renderizar conteúdo de mobilização
-    const renderizarConteudoMobilizacao = () => {
-        // Se não estamos na etapa correta para mobilização
-        if (!['AGUARDANDO', 'MOBILIZACAO', 'AGUARDANDO_OPERACAO'].includes(etapaAtual)) {
-            return (
-                <View style={styles.alertaContainer}>
-                    <Ionicons name="alert-circle" size={24} color="#F57C00" />
-                    <Text style={styles.alertaTexto}>
-                        A fase de mobilização já foi concluída para esta operação.
-                    </Text>
-                </View>
-            );
-        }
-
-        // Timer de mobilização
-        const renderTimer = () => {
-            if (inicioMobilizacao) {
-                return (
-                    <View style={styles.timerCard}>
-                        <Text style={styles.timerTitle}>Tempo de Mobilização</Text>
-                        <Text style={styles.timerValue}>{formatarTempo(tempoMobilizacao)}</Text>
-                        <Text style={styles.timerStatus}>
-                            {etapaAtual === 'MOBILIZACAO'
-                                ? 'Mobilização em andamento'
-                                : 'Mobilização concluída'}
-                        </Text>
-                        {etapaAtual === 'MOBILIZACAO' && inicioMobilizacao && !fimMobilizacao && (
-                            <Text style={styles.timerInicio}>
-                                Iniciado em: {inicioMobilizacao.toLocaleString()}
-                            </Text>
-                        )}
-                    </View>
-                );
-            }
-            return null;
-        };
-
-        // Etapa aguardando - botão iniciar mobilização
-        if (etapaAtual === 'AGUARDANDO') {
-            return (
-                <>
-                    {renderTimer()}
-                    <View style={styles.formContainer}>
-                        <Text style={styles.sectionTitle}>Iniciar Mobilização</Text>
-                        <Text style={styles.instrucoes}>
-                            Clique no botão abaixo para iniciar o processo de mobilização da equipe e equipamentos.
-                            A mobilização consiste no preparo e transporte dos recursos até o local da operação.
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.btnMobilizacao}
-                            onPress={iniciarMobilizacao}
-                            disabled={loading}
-                        >
-                            <Ionicons name="play-circle" size={24} color="#fff" />
-                            <Text style={styles.btnText}>INICIAR MOBILIZAÇÃO</Text>
-                        </TouchableOpacity>
-                    </View>
-                </>
-            );
-        }
-
-        // Etapa mobilização - checklist e finalização
-        if (etapaAtual === 'MOBILIZACAO') {
-            return (
-                <>
-                    {/* Botão para reiniciar mobilização, se desejar */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 10 }}>
-                        <TouchableOpacity
-                            style={[styles.btnMobilizacao, { marginRight: 10 }]}
-                            onPress={iniciarMobilizacao}
-                            disabled={loading}
-                        >
-                            <Ionicons name="play-circle" size={24} color="#fff" />
-                            <Text style={styles.btnText}>INICIAR MOBILIZAÇÃO</Text>
-                        </TouchableOpacity>
-                    </View>
-                    <View style={styles.formContainer}>
-                        <Text style={styles.sectionTitle}>Checklist de Mobilização</Text>
-
-                        <View style={styles.checklistContainer}>
-                            {itensChecklistMob.map((item, index) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    style={styles.checklistItem}
-                                    onPress={() => alternarItemChecklistMob(index)}
-                                >
-                                    <Ionicons
-                                        name={item.concluido ? "checkbox" : "square-outline"}
-                                        size={24}
-                                        color={item.concluido ? "#FF9800" : "#757575"}
-                                    />
-                                    <Text style={[
-                                        styles.checklistText,
-                                        item.concluido && styles.checklistTextConcluido
-                                    ]}>
-                                        {item.texto}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-
-                        <View style={styles.observacoesContainer}>
-                            <Text style={styles.label}>Observações</Text>
-                            <View style={styles.inputWrapper}>
-                                <TextInput
-                                    style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
-                                    placeholder="Observações sobre a mobilização"
-                                    value={observacoesMobilizacao}
-                                    onChangeText={setObservacoesMobilizacao}
-                                    multiline={true}
-                                    numberOfLines={4}
-                                />
-                            </View>
-                        </View>
-
-                        <TouchableOpacity
-                            style={[styles.btnMobilizacao, checklistMobConcluido ? {} : { backgroundColor: '#bdbdbd' }]}
-                            onPress={finalizarMobilizacao}
-                            disabled={loading || !checklistMobConcluido}
-                        >
-                            <Ionicons name="checkmark-circle" size={24} color="#fff" />
-                            <Text style={styles.btnText}>FINALIZAR MOBILIZAÇÃO</Text>
-                        </TouchableOpacity>
-
-                        {!checklistMobConcluido && (
-                            <Text style={styles.avisoChecklist}>
-                                Complete todos os itens do checklist para finalizar.
-                            </Text>
-                        )}
-                    </View>
-                </>
-            );
-        }
-
-        // Etapa mobilização concluída - resumo
-        if (etapaAtual === 'AGUARDANDO_OPERACAO') {
-            return (
-                <>
-                    {renderTimer()}
-                    <View style={styles.formContainer}>
-                        <Text style={styles.sectionTitle}>Mobilização Concluída</Text>
-
-                        <View style={styles.resumoContainer}>
-                            <View style={styles.resumoItem}>
-                                <Text style={styles.resumoLabel}>Início:</Text>
-                                <Text style={styles.resumoValor}>
-                                    {inicioMobilizacao ? inicioMobilizacao.toLocaleString() : 'N/A'}
-                                </Text>
-                            </View>
-
-                            <View style={styles.resumoItem}>
-                                <Text style={styles.resumoLabel}>Fim:</Text>
-                                <Text style={styles.resumoValor}>
-                                    {fimMobilizacao ? fimMobilizacao.toLocaleString() : 'N/A'}
-                                </Text>
-                            </View>
-
-                            <View style={styles.resumoItem}>
-                                <Text style={styles.resumoLabel}>Tempo Total:</Text>
-                                <Text style={[styles.resumoValor, styles.tempoTotalMob]}>
-                                    {formatarTempo(tempoMobilizacao)}
-                                </Text>
-                            </View>
-
-                            {observacoesMobilizacao ? (
-                                <View style={styles.resumoItem}>
-                                    <Text style={styles.resumoLabel}>Observações:</Text>
-                                    <Text style={styles.resumoValor}>
-                                        {observacoesMobilizacao}
-                                    </Text>
-                                </View>
-                            ) : null}
-                        </View>
-
-                        <TouchableOpacity
-                            style={[styles.btnOperacao]}
-                            onPress={() => navigation.navigate('Operacoes')}
-                        >
-                            <Ionicons name="arrow-forward" size={24} color="#fff" />
-                            <Text style={styles.btnText}>IR PARA OPERAÇÃO</Text>
-                        </TouchableOpacity>
-                    </View>
-                </>
-            );
-        }
+    // Função para abrir modal
+    const abrirModal = (tipo) => {
+        setModalTipo(tipo);
+        setModalVisible(true);
+        setAtividadeIniciada(false);
+        setInicioAtividade(null);
+        setFimAtividade(null);
+        setDuracaoAtividade(null);
     };
 
-    // Renderizar conteúdo de desmobilização
-    const renderizarConteudoDesmobilizacao = () => {
-        // Se estamos em etapas anteriores à desmobilização
-        if (['AGUARDANDO', 'MOBILIZACAO', 'AGUARDANDO_OPERACAO', 'OPERACAO'].includes(etapaAtual)) {
-            return (
-                <View style={styles.alertaContainer}>
-                    <Ionicons name="alert-circle" size={24} color="#9C27B0" />
-                    <Text style={styles.alertaTexto}>
-                        A fase de desmobilização só estará disponível após a conclusão da operação.
-                    </Text>
-                </View>
-            );
-        }
-
-        // Timer de desmobilização
-        const renderTimer = () => {
-            if (inicioDesmobilizacao) {
-                return (
-                    <View style={styles.timerCardDes}>
-                        <Text style={styles.timerTitleDes}>Tempo de Desmobilização</Text>
-                        <Text style={styles.timerValueDes}>{formatarTempo(tempoDesmobilizacao)}</Text>
-                        <Text style={styles.timerStatusDes}>
-                            {etapaAtual === 'DESMOBILIZACAO'
-                                ? 'Desmobilização em andamento'
-                                : 'Desmobilização concluída'}
-                        </Text>
-                        {etapaAtual === 'DESMOBILIZACAO' && inicioDesmobilizacao && !fimDesmobilizacao && (
-                            <Text style={styles.timerInicio}>
-                                Iniciado em: {inicioDesmobilizacao.toLocaleString()}
-                            </Text>
-                        )}
-                    </View>
-                );
-            }
-            return null;
-        };
-
-        // Etapa aguardando desmobilização
-        if (etapaAtual === 'AGUARDANDO_DESMOBILIZACAO') {
-            return (
-                <>
-                    {renderTimer()}
-                    <View style={styles.formContainer}>
-                        <Text style={styles.sectionTitle}>Iniciar Desmobilização</Text>
-                        <Text style={styles.instrucoes}>
-                            Informe a quilometragem inicial e clique no botão abaixo para iniciar o processo de desmobilização.
-                            A desmobilização consiste na retirada dos recursos do local da operação.
-                        </Text>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Quilometragem Inicial (Km)</Text>
-                            <View style={styles.inputWrapper}>
-                                <Ionicons name="speedometer-outline" size={20} color="#666" style={styles.inputIcon} />
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="0"
-                                    value={kmInicial}
-                                    onChangeText={setKmInicial}
-                                    keyboardType="numeric"
-                                />
-                            </View>
-                        </View>
-
-                        <TouchableOpacity
-                            style={[styles.btnDesmobilizacao, !kmInicial ? { backgroundColor: '#bdbdbd' } : {}]}
-                            onPress={iniciarDesmobilizacao}
-                            disabled={loading || !kmInicial}
-                        >
-                            <Ionicons name="play-circle" size={24} color="#fff" />
-                            <Text style={styles.btnText}>INICIAR DESMOBILIZAÇÃO</Text>
-                        </TouchableOpacity>
-                    </View>
-                </>
-            );
-        }
-
-        // Etapa desmobilização - checklist e finalização
-        if (etapaAtual === 'DESMOBILIZACAO') {
-            return (
-                <>
-                    {renderTimer()}
-                    <View style={styles.formContainer}>
-                        <Text style={styles.sectionTitle}>Checklist de Desmobilização</Text>
-
-                        <View style={styles.checklistContainer}>
-                            {itensChecklistDes.map((item, index) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    style={styles.checklistItem}
-                                    onPress={() => alternarItemChecklistDes(index)}
-                                >
-                                    <Ionicons
-                                        name={item.concluido ? "checkbox" : "square-outline"}
-                                        size={24}
-                                        color={item.concluido ? "#9C27B0" : "#757575"}
-                                    />
-                                    <Text style={[
-                                        styles.checklistText,
-                                        item.concluido && styles.checklistTextConcluido
-                                    ]}>
-                                        {item.texto}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Quilometragem Final (Km)</Text>
-                            <View style={styles.inputWrapper}>
-                                <Ionicons name="speedometer-outline" size={20} color="#666" style={styles.inputIcon} />
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="0"
-                                    value={kmFinal}
-                                    onChangeText={setKmFinal}
-                                    keyboardType="numeric"
-                                />
-                            </View>
-                        </View>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Observações</Text>
-                            <View style={styles.inputWrapper}>
-                                <TextInput
-                                    style={[styles.input, { height: 100, textAlignVertical: 'top', paddingHorizontal: 12 }]}
-                                    placeholder="Observações sobre a desmobilização"
-                                    value={observacoesDesmobilizacao}
-                                    onChangeText={setObservacoesDesmobilizacao}
-                                    multiline={true}
-                                    numberOfLines={4}
-                                />
-                            </View>
-                        </View>
-
-                        <TouchableOpacity
-                            style={[
-                                styles.btnDesmobilizacao,
-                                (checklistDesConcluido && kmFinal) ? {} : { backgroundColor: '#bdbdbd' }
-                            ]}
-                            onPress={finalizarDesmobilizacao}
-                            disabled={loading || !checklistDesConcluido || !kmFinal}
-                        >
-                            <Ionicons name="checkmark-circle" size={24} color="#fff" />
-                            <Text style={styles.btnText}>FINALIZAR DESMOBILIZAÇÃO</Text>
-                        </TouchableOpacity>
-
-                        {!checklistDesConcluido && (
-                            <Text style={styles.avisoChecklist}>
-                                Complete todos os itens do checklist para finalizar.
-                            </Text>
-                        )}
-                    </View>
-                </>
-            );
-        }
-
-        // Etapa finalizado - resumo
-        if (etapaAtual === 'FINALIZADO') {
-            return (
-                <>
-                    {renderTimer()}
-                    <View style={styles.formContainer}>
-                        <Text style={styles.sectionTitle}>Desmobilização Concluída</Text>
-
-                        <View style={styles.resumoContainer}>
-                            <View style={styles.resumoItem}>
-                                <Text style={styles.resumoLabel}>Início:</Text>
-                                <Text style={styles.resumoValor}>
-                                    {inicioDesmobilizacao ? inicioDesmobilizacao.toLocaleString() : 'N/A'}
-                                </Text>
-                            </View>
-
-                            <View style={styles.resumoItem}>
-                                <Text style={styles.resumoLabel}>Fim:</Text>
-                                <Text style={styles.resumoValor}>
-                                    {fimDesmobilizacao ? fimDesmobilizacao.toLocaleString() : 'N/A'}
-                                </Text>
-                            </View>
-
-                            <View style={styles.resumoItem}>
-                                <Text style={styles.resumoLabel}>Tempo Total:</Text>
-                                <Text style={[styles.resumoValor, styles.tempoTotalDes]}>
-                                    {formatarTempo(tempoDesmobilizacao)}
-                                </Text>
-                            </View>
-
-                            <View style={styles.resumoItem}>
-                                <Text style={styles.resumoLabel}>Quilometragem:</Text>
-                                <Text style={styles.resumoValor}>
-                                    {kmInicial} km → {kmFinal} km ({(parseFloat(kmFinal) - parseFloat(kmInicial)).toFixed(1)} km)
-                                </Text>
-                            </View>
-
-                            {observacoesDesmobilizacao ? (
-                                <View style={styles.resumoItem}>
-                                    <Text style={styles.resumoLabel}>Observações:</Text>
-                                    <Text style={styles.resumoValor}>
-                                        {observacoesDesmobilizacao}
-                                    </Text>
-                                </View>
-                            ) : null}
-                        </View>
-
-                        <TouchableOpacity
-                            style={[styles.btnOperacao]}
-                            onPress={() => navigation.navigate('Home')}
-                        >
-                            <Ionicons name="home" size={24} color="#fff" />
-                            <Text style={styles.btnText}>IR PARA HOME</Text>
-                        </TouchableOpacity>
-                    </View>
-                </>
-            );
-        }
+    // Iniciar atividade
+    const iniciarAtividade = () => {
+        const agora = new Date();
+        setInicioAtividade(agora);
+        setAtividadeIniciada(true);
+        setFimAtividade(null);
+        setDuracaoAtividade(null);
     };
+
+    // Finalizar atividade
+    const finalizarAtividade = () => {
+        if (!atividadeIniciada || !inicioAtividade) {
+            Alert.alert('Atenção', 'Inicie a atividade primeiro.');
+            return;
+        }
+        const agora = new Date();
+        setFimAtividade(agora);
+        const duracao = Math.round((agora - inicioAtividade) / 60000); // minutos
+        setDuracaoAtividade(duracao);
+        setAtividadeIniciada(false);
+        Alert.alert('Atividade finalizada', `Duração: ${duracao} minutos`);
+    };
+
+    // Resumo para exibir no final
+    const renderResumoAtividade = () => (
+        <View style={styles.resumoContainer}>
+            <Text style={styles.sectionTitle}>Resumo da Atividade</Text>
+            <Text>Tipo: {modalTipo === 'mobilizacao' ? 'Mobilização' : 'Desmobilização'}</Text>
+            <Text>Início: {inicioAtividade ? inicioAtividade.toLocaleString() : 'N/A'}</Text>
+            <Text>Fim: {fimAtividade ? fimAtividade.toLocaleString() : 'N/A'}</Text>
+            <Text>Duração: {duracaoAtividade !== null ? `${duracaoAtividade} minutos` : 'N/A'}</Text>
+        </View>
+    );
 
     return (
         <KeyboardAvoidingView
@@ -809,78 +483,54 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
                     <Text style={styles.headerText}>
                         {tipoEtapa === 'mobilizacao' ? 'Mobilização' : 'Desmobilização'}
                     </Text>
-                    <TouchableOpacity
-                        style={styles.refreshButton}
-                        onPress={verificarOperacaoAtiva}
-                    >
-                        <Ionicons
-                            name="refresh"
-                            size={24}
-                            color={tipoEtapa === 'mobilizacao' ? '#FF9800' : '#9C27B0'}
-                        />
-                    </TouchableOpacity>
                 </View>
 
                 {/* Selector de etapa */}
                 {renderizarSeletorEtapa()}
 
-                {/* Verificação de operação ativa */}
-                {!operacaoAtiva && !loading ? (
-                    <View style={styles.alertaContainer}>
-                        <Ionicons name="alert-circle" size={24} color="#F57C00" />
-                        <Text style={styles.alertaTexto}>
-                            É necessário criar uma operação antes de iniciar a mobilização ou desmobilização.
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.botaoNavegar}
-                            onPress={() => navigation.navigate('Operacoes')}
-                        >
-                            <Text style={styles.botaoNavegarTexto}>Ir para Operações</Text>
-                        </TouchableOpacity>
+                {/* Modal de atividade */}
+                <Modal
+                    visible={modalVisible}
+                    transparent
+                    animationType="slide"
+                    onRequestClose={() => setModalVisible(false)}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                            <Text style={styles.sectionTitle}>
+                                {modalTipo === 'mobilizacao' ? 'Mobilização' : 'Desmobilização'}
+                            </Text>
+                            <TouchableOpacity
+                                style={[styles.btnMobilizacao, atividadeIniciada && { backgroundColor: '#bdbdbd' }]}
+                                onPress={iniciarAtividade}
+                                disabled={atividadeIniciada}
+                            >
+                                <Text style={styles.btnText}>Iniciar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.btnDesmobilizacao, (!atividadeIniciada || fimAtividade) && { backgroundColor: '#bdbdbd' }]}
+                                onPress={finalizarAtividade}
+                                disabled={!atividadeIniciada || fimAtividade}
+                            >
+                                <Text style={styles.btnText}>Finalizar</Text>
+                            </TouchableOpacity>
+                            {duracaoAtividade !== null && (
+                                <View style={{ marginTop: 20 }}>
+                                    <Text style={{ fontWeight: 'bold' }}>Duração registrada: {duracaoAtividade} minutos</Text>
+                                </View>
+                            )}
+                            <TouchableOpacity
+                                style={[styles.btnOperacao, { marginTop: 20 }]}
+                                onPress={() => setModalVisible(false)}
+                            >
+                                <Text style={styles.btnText}>Fechar</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                ) : (
-                    <>
-                        {/* Detalhes da operação */}
-                        {operacaoAtiva && (
-                            <View style={styles.operacaoCard}>
-                                <Text style={styles.operacaoTitulo}>
-                                    Operação #{operacaoAtiva.id}
-                                </Text>
-                                <Text style={styles.operacaoInfo}>
-                                    Tipo: {operacaoAtiva.tipo_operacao || 'Não definido'}
-                                </Text>
-                                <Text style={styles.operacaoInfo}>
-                                    Local: {operacaoAtiva.cidade || 'Não definido'} - Poço: {operacaoAtiva.poco || 'Não definido'}
-                                </Text>
-                                <Text style={styles.operacaoInfo}>
-                                    Etapa: {etapaAtual}
-                                </Text>
-                            </View>
-                        )}
+                </Modal>
 
-                        {/* Mensagem de erro */}
-                        {error && (
-                            <View style={styles.errorContainer}>
-                                <Ionicons name="alert-circle" size={24} color="#D32F2F" />
-                                <Text style={styles.errorText}>{error}</Text>
-                            </View>
-                        )}
-
-                        {/* Conteúdo da etapa selecionada */}
-                        {tipoEtapa === 'mobilizacao'
-                            ? renderizarConteudoMobilizacao()
-                            : renderizarConteudoDesmobilizacao()}
-                    </>
-                )}
-
-                {/* Indicador de carregamento */}
-                {loading && (
-                    <ActivityIndicator
-                        size="large"
-                        color={tipoEtapa === 'mobilizacao' ? '#FF9800' : '#9C27B0'}
-                        style={styles.loader}
-                    />
-                )}
+                {/* Resumo da atividade */}
+                {duracaoAtividade !== null && renderResumoAtividade()}
             </ScrollView>
         </KeyboardAvoidingView>
     );
@@ -1088,39 +738,60 @@ const styles = StyleSheet.create({
     },
     btnMobilizacao: {
         backgroundColor: '#FF9800',
-        borderRadius: 8,
-        height: 54,
+        borderRadius: 12,
+        height: 56,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: 10,
-        elevation: 3,
+        marginTop: 16,
+        marginBottom: 8,
+        elevation: 4,
+        shadowColor: '#FF9800',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        paddingHorizontal: 24,
+        minWidth: 180,
     },
     btnDesmobilizacao: {
         backgroundColor: '#9C27B0',
-        borderRadius: 8,
-        height: 54,
+        borderRadius: 12,
+        height: 56,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: 10,
-        elevation: 3,
+        marginTop: 8,
+        marginBottom: 8,
+        elevation: 4,
+        shadowColor: '#9C27B0',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        paddingHorizontal: 24,
+        minWidth: 180,
     },
     btnOperacao: {
         backgroundColor: '#2196F3',
-        borderRadius: 8,
-        height: 54,
+        borderRadius: 12,
+        height: 56,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: 10,
-        elevation: 3,
+        marginTop: 16,
+        elevation: 4,
+        shadowColor: '#2196F3',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        paddingHorizontal: 24,
+        minWidth: 180,
     },
     btnText: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: 'bold',
         marginLeft: 8,
+        letterSpacing: 1,
     },
     loader: {
         position: 'absolute',
@@ -1208,5 +879,18 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: '#9C27B0',
         fontSize: 18,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 24,
+        width: '85%',
+        alignItems: 'center',
     },
 });

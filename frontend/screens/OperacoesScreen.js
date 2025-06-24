@@ -112,63 +112,6 @@ export default function OperacoesScreen({ navigation, route }) {
     };
   }, [etapaAtual, inicioOperacao, fimOperacao]);
 
-  // Função para verificar se há operação ativa
-  const verificarOperacaoAtiva = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`${API_URL}/operacoes/ativa`);
-
-      if (response.data) {
-        const operacao = response.data;
-        setOperacaoId(operacao.id);
-
-        // Preencher campos do formulário com dados da operação
-        setTipoOperacao(operacao.tipo_operacao || ' ');
-        setCidade(operacao.cidade || '');
-
-        // Limpando o valor "deslocamento sem operação" se vier do backend
-        if (operacao.poco === 'deslocamento sem operacao') {
-          setPoco('');
-        } else {
-          setPoco(operacao.poco || '');
-        }
-
-        setRepresentante(operacao.representante || '');
-        setVolume(operacao.volume ? operacao.volume.toString() : '');
-        setTemperaturaQuente(operacao.temperatura_quente);
-        setPressao(operacao.pressao ? operacao.pressao.toString() : '');
-        setAtividades(operacao.atividades || '');
-
-        // Definir a etapa atual
-        setEtapaAtual(operacao.etapa_atual);
-
-        // Configurar tempos e datas para operação
-        if (operacao.inicio_operacao) {
-          setInicioOperacao(new Date(operacao.inicio_operacao));
-          if (operacao.fim_operacao) {
-            setFimOperacao(new Date(operacao.fim_operacao));
-            setTempoOperacao(operacao.tempo_operacao || 0);
-          } else {
-            // Calcular tempo decorrido
-            const agora = new Date();
-            const segundosDecorridos = Math.floor((agora - new Date(operacao.inicio_operacao)) / 1000);
-            setTempoOperacao(segundosDecorridos);
-          }
-        }
-      }
-    } catch (err) {
-      // Se não encontrou operação ativa, não é um erro
-      if (err.response && err.response.status === 404) {
-        console.log('Nenhuma operação ativa encontrada');
-      } else {
-        console.error('Erro ao verificar operação ativa:', err);
-        setError('Erro ao verificar operação ativa');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Função para iniciar mobilização
   const iniciarMobilizacao = async () => {
     try {
@@ -546,6 +489,47 @@ export default function OperacoesScreen({ navigation, route }) {
       </View>
     );
   };
+
+  // Função para buscar operação ativa
+  const buscarOperacaoAtiva = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await axios.get(`${API_URL}/operacoes/ativa`);
+      if (response.data && response.data.id) {
+        setOperacaoId(response.data.id);
+        setTipoOperacao(response.data.tipo_operacao || '');
+        setCidade(response.data.cidade || '');
+        setPoco(response.data.poco || '');
+        setRepresentante(response.data.representante || '');
+        setVolume(response.data.volume ? String(response.data.volume) : '');
+        setPressao(response.data.pressao ? String(response.data.pressao) : '');
+        setTemperaturaQuente(response.data.temperatura_quente || false);
+        setAtividades(response.data.atividades || '');
+        setEtapaAtual(response.data.etapa_atual || 'AGUARDANDO');
+        setInicioOperacao(response.data.inicio_operacao ? new Date(response.data.inicio_operacao) : null);
+        setFimOperacao(response.data.fim_operacao ? new Date(response.data.fim_operacao) : null);
+        // Adicione outros campos conforme necessário
+      } else {
+        setOperacaoId(null);
+        setEtapaAtual('AGUARDANDO');
+        setInicioOperacao(null);
+        setFimOperacao(null);
+      }
+    } catch (err) {
+      setOperacaoId(null);
+      setEtapaAtual('AGUARDANDO');
+      setInicioOperacao(null);
+      setFimOperacao(null);
+      // Não precisa mostrar erro se não houver operação ativa
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    buscarOperacaoAtiva();
+  }, []);
 
   return (
     <KeyboardAvoidingView

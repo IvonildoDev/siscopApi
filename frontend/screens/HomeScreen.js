@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // URL da API
 const API_URL = 'http://192.168.1.106:3000';
@@ -40,15 +41,13 @@ export default function HomeScreen({ navigation }) {
       // Buscar equipe ativa
       const resEquipe = await axios.get(`${API_URL}/equipes/ativa`);
       setEquipeAtiva(resEquipe.data);
-      
+
       // Buscar operação ativa
       const resOperacao = await axios.get(`${API_URL}/operacoes/ativa`);
       setOperacaoAtiva(resOperacao.data);
-      
+
       setError(null);
     } catch (err) {
-      console.error('Erro ao carregar dados:', err);
-      setError('Falha ao carregar informações. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -64,7 +63,7 @@ export default function HomeScreen({ navigation }) {
       'DESMOBILIZACAO': 'Desmobilização',
       'FINALIZADO': 'Finalizada'
     };
-    
+
     return traducoes[etapa] || etapa;
   };
 
@@ -97,8 +96,8 @@ export default function HomeScreen({ navigation }) {
   const renderEquipeAtiva = () => {
     if (!equipeAtiva) {
       return (
-        <TouchableOpacity 
-          style={styles.card} 
+        <TouchableOpacity
+          style={styles.card}
           onPress={() => navigation.navigate('CadastroEquipe')}
         >
           <Ionicons name="people" size={24} color="#9C27B0" />
@@ -112,8 +111,8 @@ export default function HomeScreen({ navigation }) {
     }
 
     return (
-      <TouchableOpacity 
-        style={styles.card} 
+      <TouchableOpacity
+        style={styles.card}
         onPress={() => navigation.navigate('CadastroEquipe')}
       >
         <Ionicons name="people" size={24} color="#9C27B0" />
@@ -132,8 +131,8 @@ export default function HomeScreen({ navigation }) {
   const renderOperacaoAtiva = () => {
     if (!operacaoAtiva) {
       return (
-        <TouchableOpacity 
-          style={styles.card} 
+        <TouchableOpacity
+          style={styles.card}
           onPress={() => navigation.navigate('Operacoes')}
         >
           <Ionicons name="build" size={24} color="#4CAF50" />
@@ -147,10 +146,10 @@ export default function HomeScreen({ navigation }) {
     }
 
     const etapaTraduzida = traduzirEtapa(operacaoAtiva.etapa_atual);
-    
+
     return (
-      <TouchableOpacity 
-        style={styles.card} 
+      <TouchableOpacity
+        style={styles.card}
         onPress={() => navigation.navigate('Operacoes')}
       >
         <Ionicons name="build" size={24} color="#4CAF50" />
@@ -168,52 +167,54 @@ export default function HomeScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>SICOP</Text>
-        <TouchableOpacity 
-          style={styles.refreshButton}
-          onPress={carregarDados}
-        >
-          <Ionicons name="refresh" size={24} color="#4CAF50" />
-        </TouchableOpacity>
-      </View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>SICOP</Text>
+          <TouchableOpacity
+            style={styles.refreshButton}
+            onPress={carregarDados}
+          >
+            <Ionicons name="refresh" size={24} color="#4CAF50" />
+          </TouchableOpacity>
+        </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
-      ) : (
-        <>
-          {error && (
-            <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={24} color="#D32F2F" />
-              <Text style={styles.error}>{error}</Text>
-            </View>
-          )}
-
-          <Text style={styles.sectionTitle}>Status Atual</Text>
-          {renderEquipeAtiva()}
-          {renderOperacaoAtiva()}
-          
-          <Text style={styles.sectionTitle}>Menu</Text>
-          <FlatList
-            data={menuOptions}
-            numColumns={2}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[styles.menuItem, { backgroundColor: item.color }]}
-                onPress={item.onPress}
-              >
-                <Ionicons name={item.icon} size={32} color="#fff" />
-                <Text style={styles.menuItemText}>{item.title}</Text>
-              </TouchableOpacity>
+        {loading ? (
+          <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
+        ) : (
+          <>
+            {error && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle" size={24} color="#D32F2F" />
+                <Text style={styles.error}>{error}</Text>
+              </View>
             )}
-            contentContainerStyle={styles.menuGrid}
-            scrollEnabled={false}
-          />
-        </>
-      )}
-    </View>
+
+            <Text style={styles.sectionTitle}>Status Atual</Text>
+            {renderEquipeAtiva()}
+            {renderOperacaoAtiva()}
+
+            <Text style={styles.sectionTitle}>Menu</Text>
+            <FlatList
+              data={menuOptions}
+              numColumns={2}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.menuItem, { backgroundColor: item.color }]}
+                  onPress={item.onPress}
+                >
+                  <Ionicons name={item.icon} size={32} color="#fff" />
+                  <Text style={styles.menuItemText}>{item.title}</Text>
+                </TouchableOpacity>
+              )}
+              contentContainerStyle={styles.menuGrid}
+              scrollEnabled={false}
+            />
+          </>
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -222,6 +223,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
     padding: 20,
+    paddingBottom: 32, // ou mais, conforme a altura da tab bar
   },
   header: {
     flexDirection: 'row',
