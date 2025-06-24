@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, FlatList, ActivityIndicator, Alert } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  FlatList,
+  Alert,
+  ActivityIndicator
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 
@@ -10,199 +18,201 @@ export default function HomeScreen({ navigation }) {
   const [equipeAtiva, setEquipeAtiva] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [operacaoAtiva, setOperacaoAtiva] = useState(null); // Inicializar como null
+  const [operacaoAtiva, setOperacaoAtiva] = useState(null);
 
-  // Menu de opções atualizado
-  const menuOptions = [
-    { id: '1', title: 'Operações', icon: 'build-outline', color: '#4CAF50', screen: 'Operacoes' },
-    { id: '2', title: 'Deslocamento', icon: 'navigate-circle-outline', color: '#2196F3', screen: 'Deslocamento' },
-    { id: '3', title: 'Aguardo', icon: 'time-outline', color: '#FF9800', screen: 'Aguardo' },
-    { id: '4', title: 'Resumo', icon: 'document-text-outline', color: '#673AB7', screen: 'Resumo' },
-  ];
-
-  // Buscar equipe ativa e operação ativa quando o componente for montado
+  // Use useEffect para buscar dados iniciais
   useEffect(() => {
-    fetchEquipeAtiva();
-    buscarOperacaoAtiva();
+    carregarDados();
+  }, []);
 
-    // Atualizar quando a tela recebe foco
+  // Atualizar quando a tela ganhar foco
+  useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      fetchEquipeAtiva();
-      buscarOperacaoAtiva();
+      carregarDados();
     });
-
     return unsubscribe;
   }, [navigation]);
 
-  // Função para buscar equipe ativa com melhor tratamento de erros
-  const fetchEquipeAtiva = async () => {
+  // Função para carregar dados
+  const carregarDados = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
+      // Buscar equipe ativa
+      const resEquipe = await axios.get(`${API_URL}/equipes/ativa`);
+      setEquipeAtiva(resEquipe.data);
+      
+      // Buscar operação ativa
+      const resOperacao = await axios.get(`${API_URL}/operacoes/ativa`);
+      setOperacaoAtiva(resOperacao.data);
+      
       setError(null);
-
-      const response = await axios.get(`${API_URL}/equipes/ativa`);
-      setEquipeAtiva(response.data);
-
     } catch (err) {
-      console.error('Erro ao buscar equipe:', err);
-
-      // Tratamento específico baseado no erro
-      if (err.response) {
-        // O servidor respondeu com um código de status diferente de 2xx
-        if (err.response.status === 404) {
-          // Não há equipe ativa - isso é um estado válido, não um erro
-          setEquipeAtiva(null);
-          setError(null);
-        } else {
-          setError(`Erro do servidor: ${err.response.status}`);
-        }
-      } else if (err.request) {
-        // A requisição foi feita mas não houve resposta
-        setError('Não foi possível conectar ao servidor. Verifique sua conexão.');
-      } else {
-        // Algo aconteceu na configuração da requisição
-        setError(`Erro: ${err.message}`);
-      }
+      console.error('Erro ao carregar dados:', err);
+      setError('Falha ao carregar informações. Tente novamente.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Função para buscar operação ativa
-  const buscarOperacaoAtiva = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/operacoes/ativa`);
+  // Traduzir etapa para texto mais amigável
+  const traduzirEtapa = (etapa) => {
+    const traducoes = {
+      'MOBILIZACAO': 'Mobilização',
+      'AGUARDANDO_OPERACAO': 'Aguardando operação',
+      'OPERACAO': 'Em operação',
+      'AGUARDANDO_DESMOBILIZACAO': 'Aguardando desmob.',
+      'DESMOBILIZACAO': 'Desmobilização',
+      'FINALIZADO': 'Finalizada'
+    };
+    
+    return traducoes[etapa] || etapa;
+  };
 
-      if (response.data) {
-        setOperacaoAtiva(response.data);
-      } else {
-        setOperacaoAtiva(null);
-      }
-    } catch (err) {
-      console.log('Nenhuma operação ativa encontrada');
-      setOperacaoAtiva(null);
+  // Opções do menu principal - removidos os itens que agora estão na barra inferior
+  const menuOptions = [
+    {
+      id: '1',
+      title: 'Cadastro de Equipe',
+      icon: 'people',
+      color: '#9C27B0',
+      onPress: () => navigation.navigate('CadastroEquipe')
+    },
+    {
+      id: '2',
+      title: 'Resumo de Atividades',
+      icon: 'document-text',
+      color: '#2196F3',
+      onPress: () => navigation.navigate('ResumoAtividades')
+    },
+    {
+      id: '3',
+      title: 'Refeição',
+      icon: 'restaurant',
+      color: '#F44336',
+      onPress: () => navigation.navigate('Refeicao')
     }
-  };
+  ];
 
-  // Função para verificar operação ativa antes de navegar - MODIFICADA
-  const verificarOperacaoENavegar = (screen) => {
-    // Removida a verificação de operação ativa
-    navigation.navigate(screen);
-  };
-
-  // Função para verificar operação ativa (mantida para compatibilidade) - MODIFICADA
-  const verificarOperacaoAtiva = () => {
-    return true; // Sempre retorna true, ignorando a verificação
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Carregando...</Text>
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.centered}>
-        <Ionicons name="alert-circle-outline" size={50} color="#F44336" />
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity
-          style={styles.retryButton}
-          onPress={fetchEquipeAtiva}
+  // Renderizar card de equipe ativa
+  const renderEquipeAtiva = () => {
+    if (!equipeAtiva) {
+      return (
+        <TouchableOpacity 
+          style={styles.card} 
+          onPress={() => navigation.navigate('CadastroEquipe')}
         >
-          <Text style={styles.retryButtonText}>Tentar Novamente</Text>
+          <Ionicons name="people" size={24} color="#9C27B0" />
+          <View style={styles.cardContent}>
+            <Text style={styles.cardTitle}>Nenhuma equipe ativa</Text>
+            <Text style={styles.cardSubtitle}>Toque para cadastrar equipe</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#888" />
         </TouchableOpacity>
-      </View>
-    );
-  }
+      );
+    }
 
-  if (!equipeAtiva) {
     return (
-      <View style={styles.centered}>
-        <Ionicons name="people-outline" size={50} color="#666" />
-        <Text style={styles.noEquipeText}>Nenhuma equipe está ativa no momento</Text>
-        <TouchableOpacity
-          style={styles.cadastrarButton}
-          onPress={() => navigation.navigate('Cadastro')}
-        >
-          <Text style={styles.cadastrarButtonText}>Cadastrar Equipe</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity 
+        style={styles.card} 
+        onPress={() => navigation.navigate('CadastroEquipe')}
+      >
+        <Ionicons name="people" size={24} color="#9C27B0" />
+        <View style={styles.cardContent}>
+          <Text style={styles.cardTitle}>Equipe Ativa</Text>
+          <Text style={styles.cardSubtitle}>
+            {equipeAtiva.operador} / {equipeAtiva.auxiliar}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#888" />
+      </TouchableOpacity>
     );
-  }
+  };
+
+  // Renderizar card da operação ativa
+  const renderOperacaoAtiva = () => {
+    if (!operacaoAtiva) {
+      return (
+        <TouchableOpacity 
+          style={styles.card} 
+          onPress={() => navigation.navigate('Operacoes')}
+        >
+          <Ionicons name="build" size={24} color="#4CAF50" />
+          <View style={styles.cardContent}>
+            <Text style={styles.cardTitle}>Nenhuma operação em andamento</Text>
+            <Text style={styles.cardSubtitle}>Toque para iniciar operação</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#888" />
+        </TouchableOpacity>
+      );
+    }
+
+    const etapaTraduzida = traduzirEtapa(operacaoAtiva.etapa_atual);
+    
+    return (
+      <TouchableOpacity 
+        style={styles.card} 
+        onPress={() => navigation.navigate('Operacoes')}
+      >
+        <Ionicons name="build" size={24} color="#4CAF50" />
+        <View style={styles.cardContent}>
+          <Text style={styles.cardTitle}>
+            {operacaoAtiva.tipo_operacao} - {operacaoAtiva.poco}
+          </Text>
+          <Text style={styles.cardSubtitle}>
+            {etapaTraduzida} - {operacaoAtiva.cidade}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#888" />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      {/* Informações da equipe */}
-      <View style={styles.equipeCard}>
-        <Text style={styles.equipeTitle}>Equipe Ativa</Text>
-        <View style={styles.equipeInfo}>
-          <View style={styles.infoRow}>
-            <Ionicons name="person" size={20} color="#4CAF50" />
-            <Text style={styles.infoLabel}>Operador:</Text>
-            <Text style={styles.infoValue}>{equipeAtiva.operador}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="person-outline" size={20} color="#4CAF50" />
-            <Text style={styles.infoLabel}>Auxiliar:</Text>
-            <Text style={styles.infoValue}>{equipeAtiva.auxiliar}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="business" size={20} color="#4CAF50" />
-            <Text style={styles.infoLabel}>Unidade:</Text>
-            <Text style={styles.infoValue}>{equipeAtiva.unidade}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="car" size={20} color="#4CAF50" />
-            <Text style={styles.infoLabel}>Placa:</Text>
-            <Text style={styles.infoValue}>{equipeAtiva.placa}</Text>
-          </View>
-        </View>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>SICOP</Text>
+        <TouchableOpacity 
+          style={styles.refreshButton}
+          onPress={carregarDados}
+        >
+          <Ionicons name="refresh" size={24} color="#4CAF50" />
+        </TouchableOpacity>
       </View>
 
-      {/* Informações da operação ativa (se houver) */}
-      {operacaoAtiva ? (
-        <View style={styles.operacaoCard}>
-          <View style={styles.operacaoHeader}>
-            <Ionicons name="build" size={20} color="#4CAF50" />
-            <Text style={styles.operacaoTitle}>Operação Ativa</Text>
-          </View>
-          <View style={styles.operacaoInfo}>
-            <Text style={styles.operacaoTipo}>
-              {operacaoAtiva.tipo_operacao || 'Tipo não especificado'} - Poço: {operacaoAtiva.poco || 'N/A'}
-            </Text>
-            <Text style={styles.operacaoCidade}>
-              <Ionicons name="location" size={14} color="#666" /> {operacaoAtiva.cidade || 'Local não especificado'}
-            </Text>
-          </View>
-        </View>
+      {loading ? (
+        <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
       ) : (
-        <View style={styles.semOperacaoCard}>
-          <Ionicons name="alert-circle-outline" size={22} color="#FFC107" />
-          <Text style={styles.semOperacaoText}>Nenhuma operação ativa. Inicie uma operação.</Text>
-        </View>
-      )}
+        <>
+          {error && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={24} color="#D32F2F" />
+              <Text style={styles.error}>{error}</Text>
+            </View>
+          )}
 
-      {/* Menu de opções */}
-      <Text style={styles.menuTitle}>Menu de Opções</Text>
-      <FlatList
-        data={menuOptions}
-        numColumns={2}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.menuItem, { backgroundColor: item.color }]}
-            onPress={() => verificarOperacaoENavegar(item.screen)}
-          >
-            <Ionicons name={item.icon} size={40} color="#fff" />
-            <Text style={styles.menuItemText}>{item.title}</Text>
-          </TouchableOpacity>
-        )}
-        contentContainerStyle={styles.menuGrid}
-      />
+          <Text style={styles.sectionTitle}>Status Atual</Text>
+          {renderEquipeAtiva()}
+          {renderOperacaoAtiva()}
+          
+          <Text style={styles.sectionTitle}>Menu</Text>
+          <FlatList
+            data={menuOptions}
+            numColumns={2}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[styles.menuItem, { backgroundColor: item.color }]}
+                onPress={item.onPress}
+              >
+                <Ionicons name={item.icon} size={32} color="#fff" />
+                <Text style={styles.menuItemText}>{item.title}</Text>
+              </TouchableOpacity>
+            )}
+            contentContainerStyle={styles.menuGrid}
+            scrollEnabled={false}
+          />
+        </>
+      )}
     </View>
   );
 }
@@ -211,163 +221,93 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    padding: 15,
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     padding: 20,
   },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  errorText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#F44336',
-    textAlign: 'center',
-  },
-  noEquipeText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-  },
-  retryButton: {
-    marginTop: 20,
-    backgroundColor: '#4CAF50',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 5,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-  },
-  cadastrarButton: {
-    marginTop: 20,
-    backgroundColor: '#2196F3',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 5,
-  },
-  cadastrarButtonText: {
-    color: '#fff',
-    fontSize: 16,
-  },
-  equipeCard: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 15,
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  equipeTitle: {
-    fontSize: 20,
+  headerTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center',
     color: '#333',
   },
-  equipeInfo: {
-    paddingVertical: 10,
+  refreshButton: {
+    padding: 8,
   },
-  infoRow: {
+  loader: {
+    marginTop: 50,
+  },
+  errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    backgroundColor: '#FFCDD2',
+    padding: 12,
+    borderRadius: 6,
+    marginBottom: 20,
   },
-  infoLabel: {
-    fontSize: 16,
-    fontWeight: '500',
+  error: {
+    color: '#D32F2F',
     marginLeft: 10,
-    width: 80,
-  },
-  infoValue: {
-    fontSize: 16,
     flex: 1,
-    color: '#333',
   },
-  menuTitle: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 10,
+    color: '#333',
+    marginTop: 20,
+    marginBottom: 15,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cardContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
     color: '#333',
   },
+  cardSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
   menuGrid: {
-    padding: 8,
+    paddingBottom: 20,
   },
   menuItem: {
     flex: 1,
-    height: 130,
     margin: 8,
+    height: 100,
+    borderRadius: 10,
     padding: 15,
-    borderRadius: 16,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.23,
-    shadowRadius: 6,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   menuItemText: {
     color: '#fff',
     fontWeight: 'bold',
-    marginTop: 12,
+    marginTop: 8,
     textAlign: 'center',
-    fontSize: 16,
-  },
-  operacaoCard: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-  },
-  operacaoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  operacaoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginLeft: 8,
-  },
-  operacaoInfo: {
-    marginLeft: 28,
-  },
-  operacaoTipo: {
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 4,
-  },
-  operacaoCidade: {
-    fontSize: 13,
-    color: '#666',
-  },
-  semOperacaoCard: {
-    backgroundColor: '#FFF8E1',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  semOperacaoText: {
-    fontSize: 14,
-    color: '#F57F17',
-    marginLeft: 8,
-    flex: 1,
-  },
+  }
 });

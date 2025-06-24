@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  TextInput, 
-  TouchableOpacity, 
-  ScrollView, 
-  ActivityIndicator, 
+import {
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
   Alert,
   Switch,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Modal
 } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,56 +21,67 @@ const API_URL = 'http://192.168.1.106:3000';
 
 // Lista de tipos de operações
 const TIPOS_OPERACAO = [
-  { id: 'desparafinacao', nome: 'Desparafinação Térmica', abrev: 'Desp. Term', icone: 'flame', cor: '#FF9800' },
-  { id: 'estanqueidade', nome: 'Teste de Estanqueidade', abrev: 'Test. Estanq', icone: 'water', cor: '#2196F3' },
-  { id: 'limpeza', nome: 'Limpeza', abrev: 'Limpeza', icone: 'sparkles', cor: '#4CAF50' },
-  { id: 'pig', nome: 'Deslocamento de PIG', abrev: 'Desl. PIG', icone: 'git-merge', cor: '#9C27B0' },
-  { id: 'outros', nome: 'Outros', abrev: 'Outros', icone: 'ellipsis-horizontal', cor: '#607D8B' }
+  'Desparafinação Térmica',
+  'Deslocamento Pig',
+  'Limpeza',
+  'Desparafinação Térmica e Pig',
+  'Teste de Estanqueidade',
+  'Outros'
+];
+
+// Lista de cidades disponíveis
+const CIDADES = [
+  'Maceió',
+  'São Miguel dos Campos',
+  'Satuba',
+  'Pilar',
+  'Rio Largo',
+  'Coruripe',
+  'Outros'
 ];
 
 export default function OperacoesScreen({ navigation, route }) {
   // Estados para controlar o formulário
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
+
   // Estados para os dados da operação
   const [operacaoId, setOperacaoId] = useState(null);
   const [tipoOperacao, setTipoOperacao] = useState('');
+  const [tipoOperacaoModalVisible, setTipoOperacaoModalVisible] = useState(false); // <-- ADICIONE ESTA LINHA
   const [cidade, setCidade] = useState('');
   const [poco, setPoco] = useState('');
   const [representante, setRepresentante] = useState('');
   const [volume, setVolume] = useState('');
   const [temperaturaQuente, setTemperaturaQuente] = useState(false); // true=quente, false=fria
+  const [cidadeModalVisible, setCidadeModalVisible] = useState(false);
   const [pressao, setPressao] = useState('');
   const [atividades, setAtividades] = useState('');
-  
+
   // Estados para controle de mobilização
-  const [etapaAtual, setEtapaAtual] = useState('AGUARDANDO'); 
+  const [etapaAtual, setEtapaAtual] = useState('AGUARDANDO');
   // Etapas: AGUARDANDO, MOBILIZACAO, OPERACAO, DESMOBILIZACAO, FINALIZADO
-  
-  const [tempoMobilizacao, setTempoMobilizacao] = useState(0);
-  const [inicioMobilizacao, setInicioMobilizacao] = useState(null);
-  const [fimMobilizacao, setFimMobilizacao] = useState(null);
-  
+
   const [tempoOperacao, setTempoOperacao] = useState(0);
   const [inicioOperacao, setInicioOperacao] = useState(null);
   const [fimOperacao, setFimOperacao] = useState(null);
-  
-  const [tempoDesmobilizacao, setTempoDesmobilizacao] = useState(0);
-  const [inicioDesmobilizacao, setInicioDesmobilizacao] = useState(null);
-  const [fimDesmobilizacao, setFimDesmobilizacao] = useState(null);
-  
+  // ...existing code...
+
+  // Adicione estes estados junto com os outros useState no início do componente:
+  const [operador, setOperador] = useState('');
+  const [auxiliar, setAuxiliar] = useState('');
+
+  // ...existing code...
+
   // Referências para timers
-  const timerMobilizacao = useRef(null);
   const timerOperacao = useRef(null);
-  const timerDesmobilizacao = useRef(null);
-  
+
   // Função para formatar o tempo (segundos para HH:MM:SS)
   const formatarTempo = (segundos) => {
     const horas = Math.floor(segundos / 3600);
     const minutos = Math.floor((segundos % 3600) / 60);
     const segs = segundos % 60;
-    
+
     return [
       horas.toString().padStart(2, '0'),
       minutos.toString().padStart(2, '0'),
@@ -77,39 +89,10 @@ export default function OperacoesScreen({ navigation, route }) {
     ].join(':');
   };
 
-  // Verificar se há operação ativa ao entrar na tela
-  useEffect(() => {
-    verificarOperacaoAtiva();
-  }, []);
-  
-  // Atualizar quando a tela receber foco
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      verificarOperacaoAtiva();
-    });
-    
-    return unsubscribe;
-  }, [navigation]);
-  
-  // Controle do timer para mobilização
-  useEffect(() => {
-    if (etapaAtual === 'MOBILIZACAO' && inicioMobilizacao && !fimMobilizacao) {
-      timerMobilizacao.current = setInterval(() => {
-        setTempoMobilizacao(prev => prev + 1);
-      }, 1000);
-    } else {
-      if (timerMobilizacao.current) {
-        clearInterval(timerMobilizacao.current);
-      }
-    }
-    
-    return () => {
-      if (timerMobilizacao.current) {
-        clearInterval(timerMobilizacao.current);
-      }
-    };
-  }, [etapaAtual, inicioMobilizacao, fimMobilizacao]);
-  
+  // Novo estado para equipe ativa e data do dia
+  const [equipeAtiva, setEquipeAtiva] = useState('Equipe 1'); // ou buscar da API se desejar
+  const [dataHoje, setDataHoje] = useState(new Date());
+
   // Controle do timer para operação
   useEffect(() => {
     if (etapaAtual === 'OPERACAO' && inicioOperacao && !fimOperacao) {
@@ -121,70 +104,44 @@ export default function OperacoesScreen({ navigation, route }) {
         clearInterval(timerOperacao.current);
       }
     }
-    
+
     return () => {
       if (timerOperacao.current) {
         clearInterval(timerOperacao.current);
       }
     };
   }, [etapaAtual, inicioOperacao, fimOperacao]);
-  
-  // Controle do timer para desmobilização
-  useEffect(() => {
-    if (etapaAtual === 'DESMOBILIZACAO' && inicioDesmobilizacao && !fimDesmobilizacao) {
-      timerDesmobilizacao.current = setInterval(() => {
-        setTempoDesmobilizacao(prev => prev + 1);
-      }, 1000);
-    } else {
-      if (timerDesmobilizacao.current) {
-        clearInterval(timerDesmobilizacao.current);
-      }
-    }
-    
-    return () => {
-      if (timerDesmobilizacao.current) {
-        clearInterval(timerDesmobilizacao.current);
-      }
-    };
-  }, [etapaAtual, inicioDesmobilizacao, fimDesmobilizacao]);
-  
+
   // Função para verificar se há operação ativa
   const verificarOperacaoAtiva = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${API_URL}/operacoes/ativa`);
-      
+
       if (response.data) {
         const operacao = response.data;
         setOperacaoId(operacao.id);
-        
+
         // Preencher campos do formulário com dados da operação
-        setTipoOperacao(operacao.tipo_operacao || '');
+        setTipoOperacao(operacao.tipo_operacao || ' ');
         setCidade(operacao.cidade || '');
-        setPoco(operacao.poco || '');
+
+        // Limpando o valor "deslocamento sem operação" se vier do backend
+        if (operacao.poco === 'deslocamento sem operacao') {
+          setPoco('');
+        } else {
+          setPoco(operacao.poco || '');
+        }
+
         setRepresentante(operacao.representante || '');
         setVolume(operacao.volume ? operacao.volume.toString() : '');
         setTemperaturaQuente(operacao.temperatura_quente);
         setPressao(operacao.pressao ? operacao.pressao.toString() : '');
         setAtividades(operacao.atividades || '');
-        
+
         // Definir a etapa atual
         setEtapaAtual(operacao.etapa_atual);
-        
-        // Configurar tempos e datas para mobilização
-        if (operacao.inicio_mobilizacao) {
-          setInicioMobilizacao(new Date(operacao.inicio_mobilizacao));
-          if (operacao.fim_mobilizacao) {
-            setFimMobilizacao(new Date(operacao.fim_mobilizacao));
-            setTempoMobilizacao(operacao.tempo_mobilizacao || 0);
-          } else {
-            // Calcular tempo decorrido
-            const agora = new Date();
-            const segundosDecorridos = Math.floor((agora - new Date(operacao.inicio_mobilizacao)) / 1000);
-            setTempoMobilizacao(segundosDecorridos);
-          }
-        }
-        
+
         // Configurar tempos e datas para operação
         if (operacao.inicio_operacao) {
           setInicioOperacao(new Date(operacao.inicio_operacao));
@@ -196,20 +153,6 @@ export default function OperacoesScreen({ navigation, route }) {
             const agora = new Date();
             const segundosDecorridos = Math.floor((agora - new Date(operacao.inicio_operacao)) / 1000);
             setTempoOperacao(segundosDecorridos);
-          }
-        }
-        
-        // Configurar tempos e datas para desmobilização
-        if (operacao.inicio_desmobilizacao) {
-          setInicioDesmobilizacao(new Date(operacao.inicio_desmobilizacao));
-          if (operacao.fim_desmobilizacao) {
-            setFimDesmobilizacao(new Date(operacao.fim_desmobilizacao));
-            setTempoDesmobilizacao(operacao.tempo_desmobilizacao || 0);
-          } else {
-            // Calcular tempo decorrido
-            const agora = new Date();
-            const segundosDecorridos = Math.floor((agora - new Date(operacao.inicio_desmobilizacao)) / 1000);
-            setTempoDesmobilizacao(segundosDecorridos);
           }
         }
       }
@@ -225,20 +168,20 @@ export default function OperacoesScreen({ navigation, route }) {
       setLoading(false);
     }
   };
-  
+
   // Função para iniciar mobilização
   const iniciarMobilizacao = async () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const dataOperacao = {
         etapa_atual: 'MOBILIZACAO',
         inicio_mobilizacao: new Date().toISOString()
       };
-      
+
       let response;
-      
+
       if (operacaoId) {
         // Atualizar operação existente
         response = await axios.put(`${API_URL}/operacoes/${operacaoId}`, dataOperacao);
@@ -247,12 +190,12 @@ export default function OperacoesScreen({ navigation, route }) {
         response = await axios.post(`${API_URL}/operacoes`, dataOperacao);
         setOperacaoId(response.data.id);
       }
-      
+
       // Atualizar estado
       setEtapaAtual('MOBILIZACAO');
       setInicioMobilizacao(new Date());
       setTempoMobilizacao(0);
-      
+
       Alert.alert('Mobilização Iniciada', 'Equipe em montagem do equipamento.');
     } catch (err) {
       tratarErro(err, 'Erro ao iniciar mobilização');
@@ -260,25 +203,25 @@ export default function OperacoesScreen({ navigation, route }) {
       setLoading(false);
     }
   };
-  
+
   // Função para finalizar mobilização
   const finalizarMobilizacao = async () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const dataOperacao = {
         etapa_atual: 'AGUARDANDO_OPERACAO',
         fim_mobilizacao: new Date().toISOString(),
         tempo_mobilizacao: tempoMobilizacao
       };
-      
+
       await axios.put(`${API_URL}/operacoes/${operacaoId}`, dataOperacao);
-      
+
       // Atualizar estado
       setEtapaAtual('AGUARDANDO_OPERACAO');
       setFimMobilizacao(new Date());
-      
+
       Alert.alert('Mobilização Finalizada', `Mobilização concluída em ${formatarTempo(tempoMobilizacao)}.`);
     } catch (err) {
       tratarErro(err, 'Erro ao finalizar mobilização');
@@ -286,105 +229,117 @@ export default function OperacoesScreen({ navigation, route }) {
       setLoading(false);
     }
   };
-  
-  // Função para iniciar operação
+
+  // Substitua a função iniciarOperacao existente por esta versão corrigida
+
   const iniciarOperacao = async () => {
-    // Validação de campos obrigatórios
-    if (!tipoOperacao) {
-      setError('Tipo de operação é obrigatório');
-      return;
-    }
-    
-    if (!cidade) {
-      setError('Cidade é obrigatória');
-      return;
-    }
-    
-    if (!poco) {
-      setError('Poço/Serviço é obrigatório');
-      return;
-    }
-    
-    if (!representante) {
-      setError('Representante da empresa é obrigatório');
-      return;
-    }
-    
-    if (!volume) {
-      setError('Volume (bbl) é obrigatório');
-      return;
-    }
-    
-    if (!pressao) {
-      setError('Pressão (PSI) é obrigatória');
-      return;
-    }
-    
     try {
       setLoading(true);
       setError(null);
-      
-      const volumeNum = parseFloat(volume);
-      const pressaoNum = parseFloat(pressao);
-      
-      if (isNaN(volumeNum)) {
-        setError('Volume deve ser um número válido');
+
+      // Validação mínima - apenas tipo de operação é obrigatório para iniciar
+      if (!tipoOperacao) {
+        setError('Selecione um tipo de operação para iniciar');
         setLoading(false);
         return;
       }
-      
-      if (isNaN(pressaoNum)) {
-        setError('Pressão deve ser um número válido');
-        setLoading(false);
-        return;
+
+      // Preparar a data para atualização - apenas com os dados essenciais
+      const inicioOperacaoNow = new Date();
+
+      if (operacaoId) {
+        // Se já existe operação, primeiro atualizamos a etapa
+        await axios.put(`${API_URL}/operacoes/${operacaoId}/etapa`, {
+          etapa: 'OPERACAO'
+        });
+
+        // Depois atualizamos os outros dados
+        await axios.put(`${API_URL}/operacoes/${operacaoId}`, {
+          tipo_operacao: tipoOperacao,
+          inicio_operacao: inicioOperacaoNow.toISOString(),
+          cidade: cidade || null,
+          poco: poco || null,
+          representante: representante || null,
+          volume: volume ? parseFloat(volume) : null,
+          pressao: pressao ? parseFloat(pressao) : null,
+          temperatura_quente: temperaturaQuente,
+          atividades: atividades || null
+        });
+      } else {
+        // Se não há operação, criar nova
+        const response = await axios.post(`${API_URL}/operacoes`, {
+          tipo_operacao: tipoOperacao,
+          inicio_operacao: inicioOperacaoNow.toISOString(),
+          etapa_atual: 'OPERACAO',
+          cidade: cidade || null,
+          poco: poco || null,
+          representante: representante || null,
+          volume: volume ? parseFloat(volume) : null,
+          pressao: pressao ? parseFloat(pressao) : null,
+          temperatura_quente: temperaturaQuente,
+          atividades: atividades || null
+        });
+
+        // Atualizar o ID da operação recém-criada
+        setOperacaoId(response.data.id);
       }
-      
-      const dataOperacao = {
-        etapa_atual: 'OPERACAO',
-        tipo_operacao: tipoOperacao,
-        cidade,
-        poco,
-        representante,
-        volume: volumeNum,
-        temperatura_quente: temperaturaQuente,
-        pressao: pressaoNum,
-        atividades,
-        inicio_operacao: new Date().toISOString()
-      };
-      
-      await axios.put(`${API_URL}/operacoes/${operacaoId}`, dataOperacao);
-      
-      // Atualizar estado
+
+      // Atualizar estado localmente
       setEtapaAtual('OPERACAO');
-      setInicioOperacao(new Date());
+      setInicioOperacao(inicioOperacaoNow);
       setTempoOperacao(0);
-      
+
       Alert.alert('Operação Iniciada', `${tipoOperacao} iniciada com sucesso.`);
     } catch (err) {
-      tratarErro(err, 'Erro ao iniciar operação');
+      console.error('Erro completo:', err);
+
+      let mensagemErro = 'Erro ao iniciar operação';
+      if (err.response && err.response.data && err.response.data.error) {
+        mensagemErro += `: ${err.response.data.error}`;
+      }
+
+      setError(mensagemErro);
+      Alert.alert('Erro', mensagemErro);
     } finally {
       setLoading(false);
     }
   };
-  
-  // Função para finalizar operação
+
+  // Similar para as outras funções como finalizarOperacao
   const finalizarOperacao = async () => {
+    // Verificar se há operação para finalizar
+    if (!operacaoId) {
+      setError('Nenhuma operação ativa para finalizar');
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
-      
-      const dataOperacao = {
-        etapa_atual: 'AGUARDANDO_DESMOBILIZACAO',
+
+      // Atualizar a etapa para AGUARDANDO_DESMOBILIZACAO
+      await axios.put(`${API_URL}/operacoes/${operacaoId}/etapa`, {
+        etapa: 'AGUARDANDO_DESMOBILIZACAO'
+      });
+
+      // Atualizar os dados da operação
+      await axios.put(`${API_URL}/operacoes/${operacaoId}`, {
+        tipo_operacao: tipoOperacao,
+        cidade: cidade || null,
+        poco: poco || null,
+        representante: representante || null,
+        volume: volume ? parseFloat(volume) : null,
+        temperatura_quente: temperaturaQuente,
+        pressao: pressao ? parseFloat(pressao) : null,
+        atividades: atividades || null,
         fim_operacao: new Date().toISOString(),
         tempo_operacao: tempoOperacao
-      };
-      
-      await axios.put(`${API_URL}/operacoes/${operacaoId}`, dataOperacao);
-      
+      });
+
       // Atualizar estado
       setEtapaAtual('AGUARDANDO_DESMOBILIZACAO');
       setFimOperacao(new Date());
-      
+
       Alert.alert('Operação Finalizada', `Operação concluída em ${formatarTempo(tempoOperacao)}.`);
     } catch (err) {
       tratarErro(err, 'Erro ao finalizar operação');
@@ -392,59 +347,7 @@ export default function OperacoesScreen({ navigation, route }) {
       setLoading(false);
     }
   };
-  
-  // Função para iniciar desmobilização
-  const iniciarDesmobilizacao = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const dataOperacao = {
-        etapa_atual: 'DESMOBILIZACAO',
-        inicio_desmobilizacao: new Date().toISOString()
-      };
-      
-      await axios.put(`${API_URL}/operacoes/${operacaoId}`, dataOperacao);
-      
-      // Atualizar estado
-      setEtapaAtual('DESMOBILIZACAO');
-      setInicioDesmobilizacao(new Date());
-      setTempoDesmobilizacao(0);
-      
-      Alert.alert('Desmobilização Iniciada', 'Equipe em desmontagem do equipamento.');
-    } catch (err) {
-      tratarErro(err, 'Erro ao iniciar desmobilização');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Função para finalizar desmobilização
-  const finalizarDesmobilizacao = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const dataOperacao = {
-        etapa_atual: 'FINALIZADO',
-        fim_desmobilizacao: new Date().toISOString(),
-        tempo_desmobilizacao: tempoDesmobilizacao
-      };
-      
-      await axios.put(`${API_URL}/operacoes/${operacaoId}`, dataOperacao);
-      
-      // Atualizar estado
-      setEtapaAtual('FINALIZADO');
-      setFimDesmobilizacao(new Date());
-      
-      Alert.alert('Desmobilização Finalizada', `Desmobilização concluída em ${formatarTempo(tempoDesmobilizacao)}.`);
-    } catch (err) {
-      tratarErro(err, 'Erro ao finalizar desmobilização');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
+
   // Função para salvar operação
   const salvarOperacao = async () => {
     // Validações básicas
@@ -452,11 +355,11 @@ export default function OperacoesScreen({ navigation, route }) {
       setError('Tipo de operação é obrigatório');
       return;
     }
-    
+
     try {
       setLoading(true);
       setError(null);
-      
+
       const dataOperacao = {
         tipo_operacao: tipoOperacao,
         cidade,
@@ -467,9 +370,9 @@ export default function OperacoesScreen({ navigation, route }) {
         pressao: pressao ? parseFloat(pressao) : null,
         atividades
       };
-      
+
       await axios.put(`${API_URL}/operacoes/${operacaoId}`, dataOperacao);
-      
+
       Alert.alert('Operação Salva', 'Os dados da operação foram salvos com sucesso.');
     } catch (err) {
       tratarErro(err, 'Erro ao salvar operação');
@@ -477,13 +380,13 @@ export default function OperacoesScreen({ navigation, route }) {
       setLoading(false);
     }
   };
-  
+
   // Função para tratamento de erros
   const tratarErro = (err, mensagemPadrao) => {
     console.error(`${mensagemPadrao}:`, err);
-    
+
     let mensagem = `${mensagemPadrao}: `;
-    
+
     if (err.response) {
       const errorDetails = err.response.data?.error || err.message;
       mensagem += `${errorDetails} (${err.response.status})`;
@@ -492,391 +395,166 @@ export default function OperacoesScreen({ navigation, route }) {
     } else {
       mensagem += err.message;
     }
-    
+
     setError(mensagem);
   };
-  
-  // Renderização dos botões de acordo com a etapa atual
-  const renderizarBotoes = () => {
-    switch (etapaAtual) {
-      case 'AGUARDANDO':
-        return (
-          <TouchableOpacity
-            style={styles.button}
-            onPress={iniciarMobilizacao}
-            disabled={loading}
-          >
-            <Ionicons name="construct" size={24} color="#fff" />
-            <Text style={styles.buttonText}>INÍCIO MOBILIZAÇÃO</Text>
-          </TouchableOpacity>
-        );
-        
-      case 'MOBILIZACAO':
-        return (
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#FF9800' }]}
-            onPress={finalizarMobilizacao}
-            disabled={loading}
-          >
-            <Ionicons name="checkmark-circle" size={24} color="#fff" />
-            <Text style={styles.buttonText}>FIM MOBILIZAÇÃO</Text>
-          </TouchableOpacity>
-        );
-        
-      case 'AGUARDANDO_OPERACAO':
-        return (
-          <TouchableOpacity
-            style={styles.button}
-            onPress={iniciarOperacao}
-            disabled={loading}
-          >
-            <Ionicons name="play-circle" size={24} color="#fff" />
-            <Text style={styles.buttonText}>INÍCIO OPERAÇÃO</Text>
-          </TouchableOpacity>
-        );
-        
-      case 'OPERACAO':
-        return (
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#FF9800' }]}
-            onPress={finalizarOperacao}
-            disabled={loading}
-          >
-            <Ionicons name="stop-circle" size={24} color="#fff" />
-            <Text style={styles.buttonText}>FIM OPERAÇÃO</Text>
-          </TouchableOpacity>
-        );
-        
-      case 'AGUARDANDO_DESMOBILIZACAO':
-        return (
-          <TouchableOpacity
-            style={styles.button}
-            onPress={iniciarDesmobilizacao}
-            disabled={loading}
-          >
-            <Ionicons name="exit-outline" size={24} color="#fff" />
-            <Text style={styles.buttonText}>INÍCIO DESMOBILIZAÇÃO</Text>
-          </TouchableOpacity>
-        );
-        
-      case 'DESMOBILIZACAO':
-        return (
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#FF9800' }]}
-            onPress={finalizarDesmobilizacao}
-            disabled={loading}
-          >
-            <Ionicons name="checkmark-done-circle" size={24} color="#fff" />
-            <Text style={styles.buttonText}>FIM DESMOBILIZAÇÃO</Text>
-          </TouchableOpacity>
-        );
-        
-      case 'FINALIZADO':
-        return (
-          <View style={styles.finalizadoContainer}>
-            <Text style={styles.finalizadoText}>Operação Finalizada</Text>
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: '#2196F3' }]}
-              onPress={() => {
-                // Reset dos estados para iniciar nova operação
-                setOperacaoId(null);
-                setEtapaAtual('AGUARDANDO');
-                setTipoOperacao('');
-                setCidade('');
-                setPoco('');
-                setRepresentante('');
-                setVolume('');
-                setTemperaturaQuente(false);
-                setPressao('');
-                setAtividades('');
-                setInicioMobilizacao(null);
-                setFimMobilizacao(null);
-                setTempoMobilizacao(0);
-                setInicioOperacao(null);
-                setFimOperacao(null);
-                setTempoOperacao(0);
-                setInicioDesmobilizacao(null);
-                setFimDesmobilizacao(null);
-                setTempoDesmobilizacao(0);
-              }}
-              disabled={loading}
-            >
-              <Ionicons name="add-circle" size={24} color="#fff" />
-              <Text style={styles.buttonText}>INICIAR NOVA OPERAÇÃO</Text>
-            </TouchableOpacity>
-          </View>
-        );
-        
-      default:
-        return null;
+
+  // Função para atualizar a etapa da operação
+  const atualizarEtapaOperacao = async (etapa) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      if (!operacaoAtiva || !operacaoAtiva.id) {
+        setError('Nenhuma operação ativa encontrada');
+        return;
+      }
+
+      console.log(`Atualizando etapa da operação ${operacaoAtiva.id} para ${etapa}`);
+
+      const response = await axios.put(
+        `${API_URL}/operacoes/${operacaoAtiva.id}/etapa`,
+        { etapa }
+      );
+
+      console.log('Etapa atualizada com sucesso:', response.data);
+
+      // Atualizar a operação ativa
+      await buscarOperacaoAtiva();
+
+      // Atualizar a lista de operações
+      await buscarOperacoes();
+
+      // Mostrar confirmação
+      Alert.alert(
+        "Etapa Atualizada",
+        `A operação foi atualizada para etapa de ${traduzirEtapa(etapa)}.`
+      );
+
+    } catch (err) {
+      console.error('Erro ao atualizar etapa:', err);
+
+      let mensagemErro = 'Não foi possível atualizar a etapa da operação.';
+      if (err.response && err.response.data && err.response.data.error) {
+        mensagemErro += ` ${err.response.data.error}`;
+      }
+
+      setError(mensagemErro);
+      Alert.alert("Erro", mensagemErro);
+    } finally {
+      setLoading(false);
     }
   };
-  
-  // Renderização dos timers ativos
-  const renderizarTimers = () => {
+
+  // Função auxiliar para traduzir os nomes das etapas
+  const traduzirEtapa = (etapa) => {
+    switch (etapa) {
+      case 'MOBILIZACAO':
+        return 'Mobilização';
+      case 'INICIO_OPERACAO':
+        return 'Início de Operação';
+      case 'DESMOBILIZACAO':
+        return 'Desmobilização';
+      default:
+        return etapa;
+    }
+  };
+
+  // Renderização dos botões de acordo com a etapa atual
+  const renderizarBotoes = () => {
     return (
-      <View style={styles.timersContainer}>
-        {/* Timer de Mobilização */}
-        {inicioMobilizacao && (
-          <View style={styles.timerCard}>
-            <Text style={styles.timerTitle}>Mobilização</Text>
-            <Text style={styles.timerValue}>
-              {formatarTempo(tempoMobilizacao)}
-            </Text>
-            <Text style={styles.timerStatus}>
-              {etapaAtual === 'MOBILIZACAO' 
-                ? 'Equipe em montagem do equipamento' 
-                : 'Concluída'}
-            </Text>
-          </View>
-        )}
-        
-        {/* Timer de Operação */}
-        {inicioOperacao && (
-          <View style={[styles.timerCard, { backgroundColor: '#E3F2FD' }]}>
-            <Text style={styles.timerTitle}>Operação</Text>
-            <Text style={[styles.timerValue, { color: '#0D47A1' }]}>
-              {formatarTempo(tempoOperacao)}
-            </Text>
-            <Text style={[styles.timerStatus, { color: '#1565C0' }]}>
-              {etapaAtual === 'OPERACAO' 
-                ? 'Em andamento' 
-                : 'Concluída'}
-            </Text>
-          </View>
-        )}
-        
-        {/* Timer de Desmobilização */}
-        {inicioDesmobilizacao && (
-          <View style={[styles.timerCard, { backgroundColor: '#FFF3E0' }]}>
-            <Text style={styles.timerTitle}>Desmobilização</Text>
-            <Text style={[styles.timerValue, { color: '#E65100' }]}>
-              {formatarTempo(tempoDesmobilizacao)}
-            </Text>
-            <Text style={[styles.timerStatus, { color: '#F57C00' }]}>
-              {etapaAtual === 'DESMOBILIZACAO' 
-                ? 'Equipe em desmontagem do equipamento' 
-                : 'Concluída'}
-            </Text>
-          </View>
-        )}
+      <View style={styles.botoesContainer}>
+        <Text style={styles.botoesTitle}>Ações</Text>
+
+        {/* Botão para salvar E finalizar operação */}
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: '#FF9800', marginTop: 10 }]}
+          onPress={finalizarOperacao}
+          disabled={loading}
+        >
+          <Ionicons name="stop-circle" size={24} color="#fff" />
+          <Text style={styles.buttonText}>SALVAR E FINALIZAR OPERAÇÃO</Text>
+        </TouchableOpacity>
       </View>
     );
   };
-  
-  // Atualize a constante TIPOS_OPERACAO para usar abreviações mais concisas
-const TIPOS_OPERACAO = [
-  { id: 'desparafinacao', nome: 'Desparafinação Térmica', abrev: 'Desp. Term', icone: 'flame', cor: '#FF9800' },
-  { id: 'estanqueidade', nome: 'Teste de Estanqueidade', abrev: 'Test. Estanq', icone: 'water', cor: '#2196F3' },
-  { id: 'limpeza', nome: 'Limpeza', abrev: 'Limpeza', icone: 'sparkles', cor: '#4CAF50' },
-  { id: 'pig', nome: 'Deslocamento de PIG', abrev: 'Desl. PIG', icone: 'git-merge', cor: '#9C27B0' },
-  { id: 'outros', nome: 'Outros', abrev: 'Outros', icone: 'ellipsis-horizontal', cor: '#607D8B' }
-];
 
-// Dentro do componente, adicione um seletor de etapa
-const renderizarSeletorEtapa = () => {
-  return (
-    <View style={styles.etapaSeletorContainer}>
-      {/* Botão de iniciar mobilização na parte superior quando em estado AGUARDANDO */}
-      {etapaAtual === 'AGUARDANDO' && (
-        <TouchableOpacity
-          style={styles.iniciarButton}
-          onPress={iniciarMobilizacao}
-          disabled={loading}
-        >
-          <Ionicons name="construct" size={22} color="#fff" />
-          <Text style={styles.iniciarButtonText}>INICIAR MOBILIZAÇÃO</Text>
-        </TouchableOpacity>
-      )}
-      
-      {/* Seletor de etapas quando já iniciou */}
-      {etapaAtual !== 'AGUARDANDO' && etapaAtual !== 'FINALIZADO' && (
-        <View style={styles.etapaSelector}>
-          <View style={styles.etapaTabs}>
-            <TouchableOpacity
-              style={[
-                styles.etapaTab,
-                (etapaAtual === 'MOBILIZACAO' || etapaAtual === 'AGUARDANDO_OPERACAO') && styles.etapaTabAtiva
-              ]}
-              disabled={etapaAtual !== 'MOBILIZACAO' && etapaAtual !== 'AGUARDANDO_OPERACAO'}
-            >
-              <Ionicons 
-                name="construct" 
-                size={20} 
-                color={(etapaAtual === 'MOBILIZACAO' || etapaAtual === 'AGUARDANDO_OPERACAO') ? '#4CAF50' : '#999'} 
-              />
-              <Text style={(etapaAtual === 'MOBILIZACAO' || etapaAtual === 'AGUARDANDO_OPERACAO') 
-                ? styles.etapaTabTextoAtivo : styles.etapaTabTexto}>
-                Mobilização
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[
-                styles.etapaTab,
-                (etapaAtual === 'OPERACAO') && styles.etapaTabAtiva
-              ]}
-              disabled={etapaAtual !== 'OPERACAO'}
-            >
-              <Ionicons 
-                name="play-circle" 
-                size={20} 
-                color={etapaAtual === 'OPERACAO' ? '#2196F3' : '#999'} 
-              />
-              <Text style={etapaAtual === 'OPERACAO' ? styles.etapaTabTextoAtivo : styles.etapaTabTexto}>
-                Operação
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[
-                styles.etapaTab,
-                (etapaAtual === 'AGUARDANDO_DESMOBILIZACAO' || etapaAtual === 'DESMOBILIZACAO') && styles.etapaTabAtiva
-              ]}
-              disabled={etapaAtual !== 'AGUARDANDO_DESMOBILIZACAO' && etapaAtual !== 'DESMOBILIZACAO'}
-            >
-              <Ionicons 
-                name="exit-outline" 
-                size={20} 
-                color={(etapaAtual === 'AGUARDANDO_DESMOBILIZACAO' || etapaAtual === 'DESMOBILIZACAO') ? '#FF9800' : '#999'} 
-              />
-              <Text style={(etapaAtual === 'AGUARDANDO_DESMOBILIZACAO' || etapaAtual === 'DESMOBILIZACAO') 
-                ? styles.etapaTabTextoAtivo : styles.etapaTabTexto}>
-                Desmobilização
-              </Text>
-            </TouchableOpacity>
-          </View>
-          
-          {/* Botão de ação baseado na etapa atual */}
-          <View style={styles.etapaAcao}>
-            {etapaAtual === 'MOBILIZACAO' && (
-              <TouchableOpacity
-                style={[styles.acaoButton, { backgroundColor: '#4CAF50' }]}
-                onPress={finalizarMobilizacao}
-                disabled={loading}
-              >
-                <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                <Text style={styles.acaoButtonText}>FINALIZAR MOBILIZAÇÃO</Text>
-              </TouchableOpacity>
-            )}
-            
-            {etapaAtual === 'AGUARDANDO_OPERACAO' && (
-              <TouchableOpacity
-                style={[styles.acaoButton, { backgroundColor: '#2196F3' }]}
-                onPress={iniciarOperacao}
-                disabled={loading}
-              >
-                <Ionicons name="play-circle" size={20} color="#fff" />
-                <Text style={styles.acaoButtonText}>INICIAR OPERAÇÃO</Text>
-              </TouchableOpacity>
-            )}
-            
-            {etapaAtual === 'OPERACAO' && (
-              <TouchableOpacity
-                style={[styles.acaoButton, { backgroundColor: '#2196F3' }]}
-                onPress={finalizarOperacao}
-                disabled={loading}
-              >
-                <Ionicons name="stop-circle" size={20} color="#fff" />
-                <Text style={styles.acaoButtonText}>FINALIZAR OPERAÇÃO</Text>
-              </TouchableOpacity>
-            )}
-            
-            {etapaAtual === 'AGUARDANDO_DESMOBILIZACAO' && (
-              <TouchableOpacity
-                style={[styles.acaoButton, { backgroundColor: '#FF9800' }]}
-                onPress={iniciarDesmobilizacao}
-                disabled={loading}
-              >
-                <Ionicons name="exit-outline" size={20} color="#fff" />
-                <Text style={styles.acaoButtonText}>INICIAR DESMOBILIZAÇÃO</Text>
-              </TouchableOpacity>
-            )}
+  // Adicione este componente acima do renderizarBotoes()
+  const renderizarEstadoAtual = () => {
+    // Traduz o estado para uma mensagem amigável
+    const getStatusInfo = () => {
+      switch (etapaAtual) {
+        case 'AGUARDANDO':
+          return { texto: 'Aguardando início', cor: '#9E9E9E', icone: 'time' };
+        case 'MOBILIZACAO':
+          return { texto: 'Mobilização em andamento', cor: '#795548', icone: 'construct' };
+        case 'AGUARDANDO_OPERACAO':
+          return { texto: 'Pronto para operar', cor: '#4CAF50', icone: 'checkmark-circle' };
+        case 'OPERACAO':
+          return { texto: 'Operação em andamento', cor: '#FF9800', icone: 'play-circle' };
+        case 'AGUARDANDO_DESMOBILIZACAO':
+          return { texto: 'Aguardando desmobilização', cor: '#795548', icone: 'exit-outline' };
+        case 'DESMOBILIZACAO':
+          return { texto: 'Desmobilização em andamento', cor: '#9C27B0', icone: 'exit' };
+        case 'FINALIZADO':
+          return { texto: 'Operação finalizada', cor: '#2196F3', icone: 'checkmark-done-circle' };
+        default:
+          return { texto: 'Status desconhecido', cor: '#607D8B', icone: 'help-circle' };
+      }
+    };
+
+    const statusInfo = getStatusInfo();
+
+    return (
+      <View style={[styles.statusContainer, { borderColor: statusInfo.cor }]}>
+        <Ionicons name={statusInfo.icone} size={24} color={statusInfo.cor} />
+        <Text style={[styles.statusText, { color: statusInfo.cor }]}>{statusInfo.texto}</Text>
+      </View>
+    );
+  };
+
+  // Estados para as abas
+  const [activeTab, setActiveTab] = useState('dados');
+
+  // Renderização do cabeçalho e abas
+  const renderizarCabecalhoEAbas = () => {
+    return (
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Ionicons name="people" size={28} color="#4CAF50" />
+          <View>
+            <Text style={styles.headerText}>{equipeAtiva}</Text>
+            <Text style={{ color: '#888', fontSize: 14 }}>
+              {dataHoje.toLocaleDateString()}
+            </Text>
+            <Text style={{ color: '#333', fontSize: 15, marginTop: 4 }}>
+              Operador: <Text style={{ fontWeight: 'bold' }}>{operador || '-'}</Text>
+            </Text>
+            <Text style={{ color: '#333', fontSize: 15 }}>
+              Auxiliar: <Text style={{ fontWeight: 'bold' }}>{auxiliar || '-'}</Text>
+            </Text>
           </View>
         </View>
-      )}
-    </View>
-  );
-};
+        <View style={styles.headerButtons}>
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() => navigation.navigate('Home')}
+          >
+            <Ionicons name="home" size={20} color="#4CAF50" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
 
-// Na parte inferior da tela, vamos adicionar o botão de finalizar desmobilização
-// Atualize o renderizarBotoes() para:
-const renderizarBotoesPrincipais = () => {
-  if (etapaAtual === 'DESMOBILIZACAO') {
-    return (
-      <TouchableOpacity
-        style={[styles.botaoPrincipal, { backgroundColor: '#FF9800' }]}
-        onPress={finalizarDesmobilizacao}
-        disabled={loading}
-      >
-        <Ionicons name="checkmark-done-circle" size={24} color="#fff" />
-        <Text style={styles.botaoPrincipalTexto}>FINALIZAR DESMOBILIZAÇÃO</Text>
-      </TouchableOpacity>
-    );
-  }
-  
-  if (etapaAtual === 'FINALIZADO') {
-    return (
-      <TouchableOpacity
-        style={[styles.botaoPrincipal, { backgroundColor: '#2196F3' }]}
-        onPress={() => {
-          // Reset dos estados para iniciar nova operação
-          setOperacaoId(null);
-          setEtapaAtual('AGUARDANDO');
-          setTipoOperacao('');
-          setCidade('');
-          setPoco('');
-          setRepresentante('');
-          setVolume('');
-          setTemperaturaQuente(false);
-          setPressao('');
-          setAtividades('');
-          setInicioMobilizacao(null);
-          setFimMobilizacao(null);
-          setTempoMobilizacao(0);
-          setInicioOperacao(null);
-          setFimOperacao(null);
-          setTempoOperacao(0);
-          setInicioDesmobilizacao(null);
-          setFimDesmobilizacao(null);
-          setTempoDesmobilizacao(0);
-        }}
-        disabled={loading}
-      >
-        <Ionicons name="add-circle" size={24} color="#fff" />
-        <Text style={styles.botaoPrincipalTexto}>INICIAR NOVA OPERAÇÃO</Text>
-      </TouchableOpacity>
-    );
-  }
-  
-  return null;
-};
-  
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={{ flex: 1 }}
     >
       <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.header}>
-          <Ionicons name="build" size={40} color="#4CAF50" />
-          <Text style={styles.headerText}>
-            {operacaoId ? `Operação #${operacaoId}` : 'Nova Operação'}
-          </Text>
-          <TouchableOpacity
-            style={styles.refreshButton}
-            onPress={verificarOperacaoAtiva}
-          >
-            <Ionicons name="refresh" size={24} color="#4CAF50" />
-          </TouchableOpacity>
-        </View>
-        
-        {/* Seletor de etapa */}
-        {renderizarSeletorEtapa()}
-        
-        {/* Timers de etapas */}
-        {renderizarTimers()}
-        
+        {renderizarCabecalhoEAbas()}
+
         {/* Mensagem de erro */}
         {error ? (
           <View style={styles.errorContainer}>
@@ -884,194 +562,452 @@ const renderizarBotoesPrincipais = () => {
             <Text style={styles.error}>{error}</Text>
           </View>
         ) : null}
-        
-        {/* Formulário de dados da operação */}
-        <View style={styles.formContainer}>
-          <Text style={styles.sectionTitle}>Dados da Operação</Text>
-          
-          {/* Tipo de Operação - Versão mais compacta */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Tipo de Operação</Text>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={styles.tipoOperacaoScroll}
-            >
-              <View style={styles.tiposContainer}>
-                {TIPOS_OPERACAO.map((tipo) => (
-                  <TouchableOpacity 
-                    key={tipo.id} 
-                    style={[
-                      styles.tipoItem, 
-                      tipoOperacao === tipo.nome && styles.tipoItemSelecionado,
-                      tipoOperacao === tipo.nome && { backgroundColor: tipo.cor }
-                    ]}
-                    onPress={() => setTipoOperacao(tipo.nome)}
-                    disabled={etapaAtual === 'FINALIZADO'}
-                  >
-                    <Ionicons 
-                      name={tipo.icone} 
-                      size={18} 
-                      color={tipoOperacao === tipo.nome ? '#fff' : tipo.cor} 
+
+        {/* Conteúdo baseado na tab ativa */}
+        {activeTab === 'dados' && (
+          <View>
+            {/* Formulário de dados da operação */}
+            <View style={styles.formContainer}>
+              <View style={styles.formHeader}>
+                <Text style={styles.sectionTitle}>Dados da Operação</Text>
+
+                {/* Botão para iniciar operação */}
+                <TouchableOpacity
+                  style={styles.iniciarOperacaoButton}
+                  onPress={iniciarOperacao}
+                  disabled={loading || etapaAtual === 'FINALIZADO'}
+                >
+                  <Ionicons name="play-circle" size={22} color="#fff" />
+                  <Text style={styles.iniciarOperacaoText}>INICIAR</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Tipo de Operação - Versão mais compacta */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Tipo de Operação</Text>
+                <TouchableOpacity
+                  style={styles.inputWrapper}
+                  onPress={() => setTipoOperacaoModalVisible(true)}
+                  disabled={etapaAtual === 'FINALIZADO'}
+                >
+                  <Ionicons name="construct" size={20} color="#666" style={styles.inputIcon} />
+                  <Text style={[styles.input, !tipoOperacao && styles.placeholderText]}>
+                    {tipoOperacao || 'Selecione o tipo de operação'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color="#666" style={styles.dropdownIcon} />
+                </TouchableOpacity>
+
+                {/* Modal para seleção do tipo de operação */}
+                <Modal
+                  animationType="slide"
+                  transparent={true}
+                  visible={tipoOperacaoModalVisible}
+                  onRequestClose={() => setTipoOperacaoModalVisible(false)}
+                >
+                  <View style={styles.centeredView}>
+                    <View style={styles.modalView}>
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Selecione o Tipo de Operação</Text>
+                        <TouchableOpacity onPress={() => setTipoOperacaoModalVisible(false)}>
+                          <Ionicons name="close" size={24} color="#333" />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView style={styles.modalList}>
+                        {TIPOS_OPERACAO.map((item, index) => (
+                          <TouchableOpacity
+                            key={index}
+                            style={[
+                              styles.cidadeItem,
+                              tipoOperacao === item && styles.cidadeItemSelecionada
+                            ]}
+                            onPress={() => {
+                              setTipoOperacao(item);
+                              setTipoOperacaoModalVisible(false);
+                            }}
+                          >
+                            <Text style={[
+                              styles.cidadeItemText,
+                              tipoOperacao === item && styles.cidadeItemTextSelecionado
+                            ]}>
+                              {item}
+                            </Text>
+                            {tipoOperacao === item && (
+                              <Ionicons name="checkmark" size={20} color="#4CAF50" />
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                      <View style={styles.modalButtons}>
+                        <TouchableOpacity
+                          style={[styles.modalButton, styles.modalButtonCancel]}
+                          onPress={() => setTipoOperacaoModalVisible(false)}
+                        >
+                          <Text style={styles.modalButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+                        {tipoOperacao && (
+                          <TouchableOpacity
+                            style={[styles.modalButton, styles.modalButtonConfirm]}
+                            onPress={() => setTipoOperacaoModalVisible(false)}
+                          >
+                            <Text style={[styles.modalButtonText, { color: '#fff' }]}>Confirmar</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                </Modal>
+              </View>
+
+              {/* Cidade */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Cidade</Text>
+                <TouchableOpacity
+                  style={styles.inputWrapper}
+                  onPress={() => setCidadeModalVisible(true)}
+                  disabled={etapaAtual === 'FINALIZADO'}
+                >
+                  <Ionicons name="business" size={20} color="#666" style={styles.inputIcon} />
+                  <Text style={[styles.input, !cidade && styles.placeholderText]}>
+                    {cidade || 'Selecione uma cidade'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color="#666" style={styles.dropdownIcon} />
+                </TouchableOpacity>
+
+                {/* Modal para seleção de cidade */}
+                <Modal
+                  animationType="slide"
+                  transparent={true}
+                  visible={cidadeModalVisible}
+                  onRequestClose={() => setCidadeModalVisible(false)}
+                >
+                  <View style={styles.centeredView}>
+                    <View style={styles.modalView}>
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Selecione a Cidade</Text>
+                        <TouchableOpacity onPress={() => setCidadeModalVisible(false)}>
+                          <Ionicons name="close" size={24} color="#333" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <ScrollView style={styles.modalList}>
+                        {CIDADES.map((item, index) => (
+                          <TouchableOpacity
+                            key={index}
+                            style={[
+                              styles.cidadeItem,
+                              cidade === item && styles.cidadeItemSelecionada
+                            ]}
+                            onPress={() => {
+                              setCidade(item);
+                              setCidadeModalVisible(false);
+                            }}
+                          >
+                            <Text style={[
+                              styles.cidadeItemText,
+                              cidade === item && styles.cidadeItemTextSelecionado
+                            ]}>
+                              {item}
+                            </Text>
+                            {cidade === item && (
+                              <Ionicons name="checkmark" size={20} color="#4CAF50" />
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+
+                      {/* Botões do modal */}
+                      <View style={styles.modalButtons}>
+                        <TouchableOpacity
+                          style={[styles.modalButton, styles.modalButtonCancel]}
+                          onPress={() => setCidadeModalVisible(false)}
+                        >
+                          <Text style={styles.modalButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+
+                        {cidade && (
+                          <TouchableOpacity
+                            style={[styles.modalButton, styles.modalButtonConfirm]}
+                            onPress={() => setCidadeModalVisible(false)}
+                          >
+                            <Text style={[styles.modalButtonText, { color: '#fff' }]}>Confirmar</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                </Modal>
+              </View>
+
+              {/* Local Trabalho */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Local Trabalho</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="water" size={20} color="#666" style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Nome do local de trabalho"
+                    value={poco}
+                    onChangeText={setPoco}
+                    editable={etapaAtual !== 'FINALIZADO'}
+                  />
+                </View>
+              </View>
+
+              {/* Representante da empresa */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Representante da Empresa</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="person" size={20} color="#666" style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Nome do representante"
+                    value={representante}
+                    onChangeText={setRepresentante}
+                    editable={etapaAtual !== 'FINALIZADO'}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.row}>
+                {/* Volume (bbl) */}
+                <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
+                  <Text style={styles.label}>Volume (bbl)</Text>
+                  <View style={styles.inputWrapper}>
+                    <Ionicons name="flask" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="0"
+                      value={volume}
+                      onChangeText={setVolume}
+                      keyboardType="numeric"
+                      editable={etapaAtual !== 'FINALIZADO'}
+                    />
+                  </View>
+                </View>
+
+                {/* Pressão (PSI) */}
+                <View style={[styles.inputGroup, { flex: 1 }]}>
+                  <Text style={styles.label}>Pressão (PSI)</Text>
+                  <View style={styles.inputWrapper}>
+                    <Ionicons name="speedometer" size={20} color="#666" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="0"
+                      value={pressao}
+                      onChangeText={setPressao}
+                      keyboardType="numeric"
+                      editable={etapaAtual !== 'FINALIZADO'}
+                    />
+                  </View>
+                </View>
+              </View>
+
+              {/* Temperatura */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Temperatura</Text>
+                <View style={styles.temperatureContainer}>
+                  <View style={styles.temperatureOption}>
+                    <Text style={[
+                      styles.temperatureText,
+                      !temperaturaQuente && styles.temperatureSelected
+                    ]}>
+                      Fria (30°C)
+                    </Text>
+                    <Switch
+                      value={temperaturaQuente}
+                      onValueChange={setTemperaturaQuente}
+                      trackColor={{ false: '#81c784', true: '#ffb74d' }}
+                      thumbColor={temperaturaQuente ? '#f57c00' : '#388e3c'}
+                      disabled={etapaAtual === 'FINALIZADO'}
                     />
                     <Text style={[
-                      styles.tipoItemText,
-                      tipoOperacao === tipo.nome && styles.tipoItemTextSelecionado
+                      styles.temperatureText,
+                      temperaturaQuente && styles.temperatureSelected
                     ]}>
-                      {tipo.abrev}
+                      Quente (95°C)
                     </Text>
-                  </TouchableOpacity>
-                ))}
+                  </View>
+                </View>
               </View>
-            </ScrollView>
-          </View>
-          
-          {/* Cidade */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Cidade</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="business" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Nome da cidade"
-                value={cidade}
-                onChangeText={setCidade}
-                editable={etapaAtual !== 'FINALIZADO'}
-              />
-            </View>
-          </View>
-          
-          {/* Poço/Serviço */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Poço/Serviço</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="water" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Identificação do poço ou serviço"
-                value={poco}
-                onChangeText={setPoco}
-                editable={etapaAtual !== 'FINALIZADO'}
-              />
-            </View>
-          </View>
-          
-          {/* Representante da empresa */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Representante da Empresa</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="person" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Nome do representante"
-                value={representante}
-                onChangeText={setRepresentante}
-                editable={etapaAtual !== 'FINALIZADO'}
-              />
-            </View>
-          </View>
-          
-          <View style={styles.row}>
-            {/* Volume (bbl) */}
-            <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
-              <Text style={styles.label}>Volume (bbl)</Text>
-              <View style={styles.inputWrapper}>
-                <Ionicons name="flask" size={20} color="#666" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="0"
-                  value={volume}
-                  onChangeText={setVolume}
-                  keyboardType="numeric"
-                  editable={etapaAtual !== 'FINALIZADO'}
-                />
+
+              {/* Atividades */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Atividades (máx. 400 caracteres)</Text>
+                <View style={[styles.inputWrapper, { height: 120 }]}>
+                  <TextInput
+                    style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
+                    placeholder="Descreva as atividades realizadas"
+                    value={atividades}
+                    onChangeText={(text) => {
+                      if (text.length <= 400) {
+                        setAtividades(text);
+                      }
+                    }}
+                    multiline={true}
+                    numberOfLines={4}
+                    maxLength={400}
+                    editable={etapaAtual !== 'FINALIZADO'}
+                  />
+                </View>
+                <Text style={styles.charCounter}>{atividades.length}/400</Text>
               </View>
-            </View>
-            
-            {/* Pressão (PSI) */}
-            <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>Pressão (PSI)</Text>
-              <View style={styles.inputWrapper}>
-                <Ionicons name="speedometer" size={20} color="#666" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="0"
-                  value={pressao}
-                  onChangeText={setPressao}
-                  keyboardType="numeric"
-                  editable={etapaAtual !== 'FINALIZADO'}
-                />
-              </View>
-            </View>
-          </View>
-          
-          {/* Temperatura */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Temperatura</Text>
-            <View style={styles.temperatureContainer}>
-              <View style={styles.temperatureOption}>
-                <Text style={[
-                  styles.temperatureText, 
-                  !temperaturaQuente && styles.temperatureSelected
-                ]}>
-                  Fria (30°C)
+
+              {/* Botão para salvar e finalizar operação */}
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: '#FF9800', marginTop: 10 }]}
+                onPress={finalizarOperacao}
+                disabled={loading}
+              >
+                <Ionicons name="stop-circle" size={24} color="#fff" />
+                <Text style={styles.buttonText}>SALVAR E FINALIZAR OPERAÇÃO</Text>
+              </TouchableOpacity>
+
+              {/* Exibir hora de início e fim da operação */}
+              {inicioOperacao && (
+                <Text style={{ marginTop: 10, color: '#1565C0', fontWeight: 'bold' }}>
+                  Início: {inicioOperacao.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </Text>
-                <Switch
-                  value={temperaturaQuente}
-                  onValueChange={setTemperaturaQuente}
-                  trackColor={{ false: '#81c784', true: '#ffb74d' }}
-                  thumbColor={temperaturaQuente ? '#f57c00' : '#388e3c'}
-                  disabled={etapaAtual === 'FINALIZADO'}
-                />
-                <Text style={[
-                  styles.temperatureText, 
-                  temperaturaQuente && styles.temperatureSelected
-                ]}>
-                  Quente (95°C)
+              )}
+              {fimOperacao && (
+                <Text style={{ marginTop: 5, color: '#E65100', fontWeight: 'bold' }}>
+                  Fim: {fimOperacao.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </Text>
-              </View>
+              )}
             </View>
           </View>
-          
-          {/* Atividades */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Atividades (máx. 400 caracteres)</Text>
-            <View style={[styles.inputWrapper, { height: 120 }]}>
-              <TextInput
-                style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
-                placeholder="Descreva as atividades realizadas"
-                value={atividades}
-                onChangeText={(text) => {
-                  // Limitar a 400 caracteres
-                  if (text.length <= 400) {
-                    setAtividades(text);
-                  }
-                }}
-                multiline={true}
-                numberOfLines={4}
-                maxLength={400}
-                editable={etapaAtual !== 'FINALIZADO'}
-              />
-            </View>
-            <Text style={styles.charCounter}>{atividades.length}/400</Text>
-          </View>
-        </View>
-        
-        {/* Botão principal na parte inferior */}
-        {renderizarBotoesPrincipais()}
-        
-        {/* Botão para salvar operação (sempre disponível exceto em AGUARDANDO) */}
-        {operacaoId && etapaAtual !== 'AGUARDANDO' && (
-          <TouchableOpacity
-            style={[styles.botaoSecundario, { backgroundColor: '#607D8B' }]}
-            onPress={salvarOperacao}
-            disabled={loading}
-          >
-            <Ionicons name="save" size={22} color="#fff" />
-            <Text style={styles.botaoSecundarioTexto}>SALVAR OPERAÇÃO</Text>
-          </TouchableOpacity>
         )}
-        
+
+        {activeTab === 'etapas' && (
+          <View style={styles.tabContentContainer}>
+            {/* Estado atual da operação */}
+            {renderizarEstadoAtual()}
+
+            <View style={styles.etapasContainer}>
+              <Text style={styles.etapasTitle}>Gerenciamento de Etapas</Text>
+
+              <View style={styles.etapaTimeline}>
+                <View style={[
+                  styles.etapaItem,
+                  etapaAtual === 'MOBILIZACAO' && styles.etapaItemActive
+                ]}>
+                  <View style={[
+                    styles.etapaCircle,
+                    etapaAtual === 'MOBILIZACAO' && styles.etapaCircleCompleted
+                  ]}>
+                    <Ionicons name="construct" size={18} color="#fff" />
+                  </View>
+                  <Text style={styles.etapaText}>Mobilização</Text>
+                </View>
+
+                <View style={styles.etapaLine} />
+
+                <View style={[
+                  styles.etapaItem,
+                  etapaAtual === 'OPERACAO' && styles.etapaItemActive
+                ]}>
+                  <View style={[
+                    styles.etapaCircle,
+                    (etapaAtual === 'OPERACAO' || inicioOperacao) && styles.etapaCircleCompleted
+                  ]}>
+                    <Ionicons name="build" size={18} color="#fff" />
+                  </View>
+                  <Text style={styles.etapaText}>Operação</Text>
+                </View>
+
+                <View style={styles.etapaLine} />
+
+                <View style={[
+                  styles.etapaItem,
+                  etapaAtual === 'DESMOBILIZACAO' && styles.etapaItemActive
+                ]}>
+                  <View style={[
+                    styles.etapaCircle,
+                    etapaAtual === 'DESMOBILIZACAO' && styles.etapaCircleCompleted
+                  ]}>
+                    <Ionicons name="exit" size={18} color="#fff" />
+                  </View>
+                  <Text style={styles.etapaText}>Desmobilização</Text>
+                </View>
+              </View>
+
+              {/* Botões específicos para cada etapa */}
+              <View style={styles.etapaAcoes}>
+                {/* Botão para iniciar operação - sempre visível */}
+                <TouchableOpacity
+                  style={[styles.acaoButton, { backgroundColor: '#1976D2', marginBottom: 10 }]}
+                  onPress={iniciarOperacao}
+                  disabled={loading}
+                >
+                  <Ionicons name="play-circle" size={20} color="#fff" />
+                  <Text style={styles.acaoButtonText}>Iniciar Operação</Text>
+                </TouchableOpacity>
+
+                {/* Botão para finalizar operação - sempre visível */}
+                <TouchableOpacity
+                  style={[styles.acaoButton, { backgroundColor: '#E65100', marginBottom: 10 }]}
+                  onPress={finalizarOperacao}
+                  disabled={loading}
+                >
+                  <Ionicons name="stop-circle" size={20} color="#fff" />
+                  <Text style={styles.acaoButtonText}>Finalizar Operação</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {activeTab === 'fotos' && (
+          <View style={styles.tabContentContainer}>
+            <View style={styles.fotosContainer}>
+              <Text style={styles.fotosTitle}>Fotos e Anexos</Text>
+
+              <TouchableOpacity style={styles.addFotoButton}>
+                <Ionicons name="camera" size={24} color="#fff" />
+                <Text style={styles.addFotoText}>Adicionar Foto</Text>
+              </TouchableOpacity>
+
+              <Text style={styles.placeholderText}>
+                Nenhuma foto adicionada ainda. Use o botão acima para adicionar fotos da operação.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {activeTab === 'historico' && (
+          <View style={styles.tabContentContainer}>
+            <View style={styles.historicoContainer}>
+              <Text style={styles.historicoTitle}>Histórico de Atividades</Text>
+
+              <View style={styles.timelineItem}>
+                <View style={styles.timelineMarker} />
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineDate}>22/06/2023 - 14:30</Text>
+                  <Text style={styles.timelineEvent}>Operação iniciada</Text>
+                  <Text style={styles.timelineDesc}>Desparafinação Térmica iniciada por João Silva</Text>
+                </View>
+              </View>
+
+              <View style={styles.timelineItem}>
+                <View style={styles.timelineMarker} />
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineDate}>22/06/2023 - 12:15</Text>
+                  <Text style={styles.timelineEvent}>Mobilização finalizada</Text>
+                  <Text style={styles.timelineDesc}>Equipamentos montados e prontos para operação</Text>
+                </View>
+              </View>
+
+              <View style={styles.timelineItem}>
+                <View style={styles.timelineMarker} />
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineDate}>22/06/2023 - 10:00</Text>
+                  <Text style={styles.timelineEvent}>Mobilização iniciada</Text>
+                  <Text style={styles.timelineDesc}>Equipe chegou no local e iniciou a montagem</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Indicador de carregamento */}
         {loading && (
           <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
@@ -1088,22 +1024,30 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
-    marginTop: 10,
+    justifyContent: 'space-between',
+    paddingTop: 10,
+    paddingBottom: 15,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerText: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
-    marginTop: 10,
-    textAlign: 'center',
+    marginLeft: 10,
   },
-  refreshButton: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    padding: 10,
+  headerButtons: {
+    flexDirection: 'row',
+  },
+  headerButton: {
+    padding: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 20,
+    marginLeft: 8,
   },
   timersContainer: {
     marginBottom: 20,
@@ -1143,6 +1087,15 @@ const styles = StyleSheet.create({
     elevation: 4,
     marginBottom: 20,
   },
+  formHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 10,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -1172,57 +1125,6 @@ const styles = StyleSheet.create({
   inputIcon: {
     padding: 10,
   },
-  input: {
-    flex: 1,
-    height: 50,
-    fontSize: 16,
-    paddingRight: 12,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  pickerContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -5,
-  },
-  pickerItem: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    margin: 5,
-    minWidth: 100,
-    alignItems: 'center',
-  },
-  pickerItemSelected: {
-    backgroundColor: '#4CAF50',
-  },
-  pickerItemText: {
-    color: '#555',
-    fontWeight: '500',
-  },
-  pickerItemTextSelected: {
-    color: '#fff',
-  },
-  temperatureContainer: {
-    alignItems: 'center',
-    marginTop: 5,
-  },
-  temperatureOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 25,
-    paddingVertical: 5,
-    paddingHorizontal: 15,
-  },
-  temperatureText: {
-    marginHorizontal: 10,
-    fontSize: 16,
-    color: '#888',
-  },
   temperatureSelected: {
     fontWeight: 'bold',
     color: '#333',
@@ -1237,204 +1139,267 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   button: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    height: 54,
-    flexDirection: 'row',
+    backgroundColor: '#FF9800',
+    borderRadius: 10,
+    borderWidth: 0,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
     alignItems: 'center',
+    flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 5,
-    elevation: 3,
+    marginTop: 16,
+    shadowColor: '#FF9800',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFCDD2',
-    padding: 12,
-    borderRadius: 6,
-    marginBottom: 20,
-  },
-  error: {
-    color: '#D32F2F',
-    marginLeft: 10,
-    flex: 1,
-  },
-  loader: {
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  finalizadoContainer: {
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  finalizadoText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#4CAF50',
-    marginBottom: 15,
+    marginLeft: 10,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
-  termicaItem: {
-    backgroundColor: '#FFF3E0',
-    borderWidth: 1,
-    borderColor: '#FF9800',
-  },
-  estanqueidadeItem: {
-    backgroundColor: '#E3F2FD',
-    borderWidth: 1,
-    borderColor: '#2196F3',
-  },
-  limpezaItem: {
-    backgroundColor: '#E8F5E9',
-    borderWidth: 1,
+  botaoEtapaAtivo: {
+    backgroundColor: '#4CAF50',
     borderColor: '#4CAF50',
   },
-  pigItem: {
-    backgroundColor: '#F3E5F5',
-    borderWidth: 1,
-    borderColor: '#9C27B0',
+  botaoEtapaIcone: {
+    marginBottom: 6,
   },
-  typeIcon: {
-    marginRight: 6,
+  botaoEtapaTexto: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#333',
+    color: '#333',
+    textAlign: 'center',
   },
-  etapaSeletorContainer: {
+  botaoEtapaTextoAtivo: {
+    color: '#fff',
+  },
+  botoesContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
+    marginBottom: 20,
+  },
+  botoesTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
     marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 10,
   },
-  iniciarButton: {
-    backgroundColor: '#4CAF50',
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
     borderRadius: 8,
-    height: 48,
+    padding: 15,
+    marginBottom: 15,
+    borderLeftWidth: 5,
+  },
+  statusText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 10,
+  },
+  formHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 10,
+  },
+  iniciarOperacaoButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 10,
-    elevation: 2,
   },
-  iniciarButtonText: {
+  iniciarOperacaoText: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: 'bold',
-    marginLeft: 8,
+    marginLeft: 6,
   },
-  etapaSelector: {
+  // Styles para o modal de seleção de cidade
+  modalContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 5,
-    elevation: 2,
+    borderRadius: 10,
+    padding: 20,
+    width: '80%',
+    maxHeight: '70%',
+    elevation: 4,
   },
-  etapaTabs: {
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 15,
+  },
+  modalList: {
+    maxHeight: 300,
+  },
+  cidadeItem: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  etapaTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
+  cidadeItemSelecionada: {
+    backgroundColor: '#E8F5E9',
   },
-  etapaTabAtiva: {
-    borderBottomColor: '#4CAF50',
-    backgroundColor: '#f9f9f9',
-  },
-  etapaTabTexto: {
-    fontSize: 12,
-    marginLeft: 5,
-    color: '#999',
-  },
-  etapaTabTextoAtivo: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginLeft: 5,
+  cidadeItemText: {
+    fontSize: 16,
     color: '#333',
   },
-  etapaAcao: {
-    padding: 12,
-  },
-  acaoButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 10,
-    borderRadius: 4,
-  },
-  acaoButtonText: {
-    color: '#fff',
-    fontSize: 14,
+  cidadeItemTextSelecionado: {
     fontWeight: 'bold',
-    marginLeft: 6,
+    color: '#4CAF50',
   },
-  // Styles para os botões principais
-  botaoPrincipal: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    height: 54,
+  modalButtons: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-    elevation: 3,
+    justifyContent: 'flex-end', // alinhamento à direita
+    marginTop: 20,
+    gap: 10, // espaço entre os botões (pode ser marginRight/marginLeft se não funcionar)
   },
-  botaoPrincipalTexto: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  botaoSecundario: {
-    backgroundColor: '#607D8B',
+  modalButton: {
+    minWidth: 100,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
     borderRadius: 8,
-    height: 48,
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 30,
+    marginLeft: 10,
     elevation: 2,
   },
-  botaoSecundarioTexto: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  // Styles para o tipo de operação
-  tipoOperacaoScroll: {
-    marginBottom: 5,
-  },
-  tiposContainer: {
-    flexDirection: 'row',
-    paddingVertical: 5,
-  },
-  tipoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  modalButtonCancel: {
     backgroundColor: '#f5f5f5',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    marginRight: 10,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#bbb',
   },
-  tipoItemSelecionado: {
+  modalButtonConfirm: {
     backgroundColor: '#4CAF50',
   },
-  tipoItemText: {
-    fontSize: 13,
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+
+  input: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    fontSize: 16,
+    color: '#333',
+  },
+  placeholderText: {
+    color: '#aaa',
+  },
+  dropdownIcon: {
+    position: 'absolute',
+    right: 10,
+  },
+  centeredView: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalView: {
+    width: '85%',
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 0,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  tabContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tabButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabButtonActive: {
+    borderBottomColor: '#4CAF50',
+  },
+  tabText: {
+    fontSize: 14,
     fontWeight: '500',
-    color: '#555',
+    color: '#666',
     marginLeft: 6,
   },
-  tipoItemTextSelecionado: {
-    color: '#fff',
+  tabTextActive: {
+    color: '#4CAF50',
+    fontWeight: 'bold',
+  },
+  botaoFlutuante: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    width: 60,
+    height: 60,
+    backgroundColor: '#4CAF50',
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
   },
 });

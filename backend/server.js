@@ -24,6 +24,30 @@ const connection = mysql.createPool({
 let equipeAtiva = null;
 let operacaoAtiva = null;
 
+// Função para normalizar campos vazios ou indesejados
+function normalizeField(value) {
+    // Se o valor for undefined, null, string vazia ou "deslocamento sem operacao", retorna null
+    if (value === undefined || value === null || value === '' || value === 'deslocamento sem operacao') {
+        return null;
+    }
+    return value;
+}
+
+// Função para normalizar dados da operação
+function normalizeOperacaoData(operacao) {
+    if (!operacao) return null;
+
+    const normalizedOperacao = { ...operacao };
+
+    // Normalizar campos específicos
+    normalizedOperacao.poco = normalizeField(operacao.poco);
+    normalizedOperacao.cidade = normalizeField(operacao.cidade);
+    normalizedOperacao.representante = normalizeField(operacao.representante);
+    normalizedOperacao.observacoes = normalizeField(operacao.observacoes);
+
+    return normalizedOperacao;
+}
+
 // Inicializar banco de dados
 function initializeDatabase() {
     const checkAndCreateQuery = `
@@ -75,7 +99,8 @@ function carregarOperacaoAtiva() {
         if (err) {
             console.error('Erro ao carregar operação ativa:', err);
         } else if (results.length > 0) {
-            operacaoAtiva = results[0];
+            // Normalizar os dados para evitar valores indesejados
+            operacaoAtiva = normalizeOperacaoData(results[0]);
             console.log('Operação ativa carregada com sucesso');
         } else {
             console.log('Nenhuma operação ativa encontrada');
@@ -93,7 +118,7 @@ const equipeValidators = [
 ];
 
 const operacaoValidators = [
-    body('tipo_operacao').isIn(['TERMICA', 'ESTANQUEIDADE', 'LIMPEZA', 'PIG']).withMessage('Tipo de operação inválido'),
+    body('tipo_operacao').isIn(['TERMICA', 'ESTANQUEIDADE', 'LIMPEZA', 'PIG', 'Desparafinação Térmica', 'Teste de Estanqueidade', 'Limpeza', 'Deslocamento de PIG', 'Outros']).withMessage('Tipo de operação inválido'),
     body('poco').optional().trim().isLength({ max: 100 }),
     body('cidade').optional().trim().isLength({ max: 100 }),
     body('observacoes').optional().trim()
@@ -274,14 +299,27 @@ app.post('/operacoes', verificarEquipeAtiva, operacaoValidators, (req, res) => {
         return res.status(400).json({ error: 'Já existe uma operação ativa. Finalize-a antes de iniciar uma nova.' });
     }
 
-    const { tipo_operacao, poco, cidade, observacoes } = req.body;
+    const { tipo_operacao, poco, cidade, observacoes, etapa_atual } = req.body;
     const query = `
         INSERT INTO operacoes 
         (equipe_id, tipo_operacao, poco, cidade, observacoes, status, etapa_atual) 
-        VALUES (?, ?, ?, ?, ?, 'ativo', 'EM_MOBILIZACAO')
+        VALUES (?, ?, ?, ?, ?, 'ativo', ?)
     `;
 
-    connection.query(query, [equipeAtiva.id, tipo_operacao, poco, cidade, observacoes], (err, result) => {
+    // Normalizar os campos antes de inserir
+    const normalizedPoco = normalizeField(poco);
+    const normalizedCidade = normalizeField(cidade);
+    const normalizedObservacoes = normalizeField(observacoes);
+    const defaultEtapa = etapa_atual || 'EM_MOBILIZACAO';
+
+    connection.query(query, [
+        equipeAtiva.id,
+        tipo_operacao,
+        normalizedPoco,
+        normalizedCidade,
+        normalizedObservacoes,
+        defaultEtapa
+    ], (err, result) => {
         if (err) {
             console.error('Erro ao adicionar operação:', err);
             return res.status(500).json({ error: 'Erro ao adicionar operação' });
@@ -294,8 +332,8 @@ app.post('/operacoes', verificarEquipeAtiva, operacaoValidators, (req, res) => {
                 return res.status(500).json({ error: 'Erro ao recuperar dados da operação' });
             }
 
-            // Armazenar em memória
-            operacaoAtiva = selectResults[0];
+            // Normalizar e armazenar em memória
+            operacaoAtiva = normalizeOperacaoData(selectResults[0]);
             res.status(201).json(operacaoAtiva);
         });
     });
@@ -303,11 +341,7 @@ app.post('/operacoes', verificarEquipeAtiva, operacaoValidators, (req, res) => {
 
 // Rota GET - Obter operação ativa
 app.get('/operacoes/ativa', (req, res) => {
-    if (operacaoAtiva) {
-        return res.json(operacaoAtiva);
-    }
-
-    // Se não tem em memória, busca no banco
+    // Sempre buscar do banco para garantir dados atualizados
     connection.query(
         'SELECT * FROM operacoes WHERE status = "ativo" AND etapa_atual != "FINALIZADA" ORDER BY id DESC LIMIT 1',
         (err, results) => {
@@ -320,8 +354,9 @@ app.get('/operacoes/ativa', (req, res) => {
                 return res.status(404).json({ error: 'Nenhuma operação ativa encontrada' });
             }
 
-            operacaoAtiva = results[0];
-            res.json(operacaoAtiva);
+            // Normalizar os dados antes de enviar
+            const operacao = normalizeOperacaoData(results[0]);
+            res.json(operacao);
         }
     );
 });
@@ -341,16 +376,19 @@ app.get('/operacoes', (req, res) => {
                 return res.status(500).json({ error: 'Erro ao buscar operações' });
             }
 
+            // Normalizar todas as operações
+            const normalizedResults = results.map(op => normalizeOperacaoData(op));
+
             // Contar total para paginação
             connection.query('SELECT COUNT(*) as total FROM operacoes', (countErr, countResults) => {
                 if (countErr) {
                     console.error('Erro ao contar operações:', countErr);
-                    return res.json(results);
+                    return res.json({ data: normalizedResults });
                 }
 
                 const total = countResults[0].total;
                 res.json({
-                    data: results,
+                    data: normalizedResults,
                     pagination: {
                         total,
                         pages: Math.ceil(total / limit),
@@ -364,46 +402,127 @@ app.get('/operacoes', (req, res) => {
 });
 
 // Rota PUT - Atualizar etapa da operação
-app.put('/operacoes/:id/etapa', verificarOperacaoAtiva, (req, res) => {
+app.put('/operacoes/:id/etapa', (req, res) => {
     const id = req.params.id;
     const { etapa } = req.body;
 
-    if (!etapa || !['EM_MOBILIZACAO', 'EM_OPERACAO', 'EM_DESMOBILIZACAO', 'AGUARDANDO', 'FINALIZADA'].includes(etapa)) {
+    if (!etapa || !['EM_MOBILIZACAO', 'MOBILIZACAO', 'EM_OPERACAO', 'OPERACAO', 'EM_DESMOBILIZACAO', 'DESMOBILIZACAO', 'AGUARDANDO', 'AGUARDANDO_OPERACAO', 'AGUARDANDO_DESMOBILIZACAO', 'FINALIZADO', 'FINALIZADA'].includes(etapa)) {
         return res.status(400).json({ error: 'Etapa inválida' });
     }
 
-    // Verificar se é a operação ativa
-    if (operacaoAtiva.id != id) {
-        return res.status(400).json({ error: 'Não é possível atualizar uma operação que não está ativa' });
-    }
-
-    // Se a etapa for FINALIZADA, incluir timestamp de fim
-    let query = 'UPDATE operacoes SET etapa_atual = ? WHERE id = ?';
-    let params = [etapa, id];
-
-    if (etapa === 'FINALIZADA') {
-        query = 'UPDATE operacoes SET etapa_atual = ?, fim_operacao = CURRENT_TIMESTAMP, status = "inativo" WHERE id = ?';
-    }
-
-    connection.query(query, params, (err, result) => {
-        if (err) {
-            console.error('Erro ao atualizar etapa da operação:', err);
-            return res.status(500).json({ error: 'Erro ao atualizar etapa da operação' });
+    // Verificar se a operação existe
+    connection.query('SELECT * FROM operacoes WHERE id = ?', [id], (checkErr, checkResults) => {
+        if (checkErr) {
+            console.error('Erro ao verificar operação:', checkErr);
+            return res.status(500).json({ error: 'Erro ao verificar operação' });
         }
 
-        if (result.affectedRows === 0) {
+        if (checkResults.length === 0) {
             return res.status(404).json({ error: 'Operação não encontrada' });
         }
 
-        // Se a operação foi finalizada, atualizar o cache
-        if (etapa === 'FINALIZADA') {
-            operacaoAtiva = null;
-            return res.json({ message: 'Operação finalizada com sucesso' });
+        // Se a etapa for FINALIZADA/FINALIZADO, incluir timestamp de fim
+        let query = 'UPDATE operacoes SET etapa_atual = ? WHERE id = ?';
+        let params = [etapa, id];
+
+        if (etapa === 'FINALIZADA' || etapa === 'FINALIZADO') {
+            query = 'UPDATE operacoes SET etapa_atual = ?, fim_operacao = CURRENT_TIMESTAMP, status = "inativo" WHERE id = ?';
         }
 
-        // Atualizar o cache
-        operacaoAtiva.etapa_atual = etapa;
-        res.json({ message: 'Etapa atualizada com sucesso', etapa });
+        connection.query(query, params, (err, result) => {
+            if (err) {
+                console.error('Erro ao atualizar etapa da operação:', err);
+                return res.status(500).json({ error: 'Erro ao atualizar etapa da operação' });
+            }
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Operação não encontrada' });
+            }
+
+            // Se a operação foi finalizada, atualizar o cache
+            if (etapa === 'FINALIZADA' || etapa === 'FINALIZADO') {
+                // Se era a operação ativa, limpe o cache
+                if (operacaoAtiva && operacaoAtiva.id == id) {
+                    operacaoAtiva = null;
+                }
+                return res.json({ message: 'Operação finalizada com sucesso' });
+            }
+
+            // Atualizar o cache se a operação atualizada é a ativa
+            if (operacaoAtiva && operacaoAtiva.id == id) {
+                operacaoAtiva.etapa_atual = etapa;
+            }
+
+            res.json({ message: 'Etapa atualizada com sucesso', etapa });
+        });
+    });
+});
+
+// Rota PUT - Atualizar operação
+app.put('/operacoes/:id', (req, res) => {
+    const id = req.params.id;
+    const { tipo_operacao, ciudad, poco, representante, volume,
+        temperatura_quente, pressao, atividades, observacoes,
+        inicio_operacao, fim_operacao, tempo_operacao,
+        etapa_atual } = req.body;
+
+    // Primeiro verificar se a operação existe
+    connection.query('SELECT * FROM operacoes WHERE id = ?', [id], (checkErr, checkResults) => {
+        if (checkErr) {
+            console.error('Erro ao verificar operação:', checkErr);
+            return res.status(500).json({ error: 'Erro ao verificar operação' });
+        }
+
+        if (checkResults.length === 0) {
+            return res.status(404).json({ error: 'Operação não encontrada' });
+        }
+
+        // Construir objeto com campos a atualizar
+        const updateFields = {};
+
+        if (tipo_operacao !== undefined) updateFields.tipo_operacao = tipo_operacao;
+        if (ciudad !== undefined) updateFields.cidade = normalizeField(ciudad);
+        if (poco !== undefined) updateFields.poco = normalizeField(poco);
+        if (representante !== undefined) updateFields.representante = normalizeField(representante);
+        if (volume !== undefined) updateFields.volume = volume;
+        if (temperatura_quente !== undefined) updateFields.temperatura_quente = temperatura_quente;
+        if (pressao !== undefined) updateFields.pressao = pressao;
+        if (atividades !== undefined) updateFields.atividades = atividades;
+        if (observacoes !== undefined) updateFields.observacoes = normalizeField(observacoes);
+        if (inicio_operacao !== undefined) updateFields.inicio_operacao = inicio_operacao;
+        if (fim_operacao !== undefined) updateFields.fim_operacao = fim_operacao;
+        if (tempo_operacao !== undefined) updateFields.tempo_operacao = tempo_operacao;
+        if (etapa_atual !== undefined) updateFields.etapa_atual = etapa_atual;
+
+        // Se não há campos para atualizar
+        if (Object.keys(updateFields).length === 0) {
+            return res.status(400).json({ error: 'Nenhum campo válido para atualização' });
+        }
+
+        // Construir query de update dinamicamente
+        const updateQuery = 'UPDATE operacoes SET ? WHERE id = ?';
+
+        connection.query(updateQuery, [updateFields, id], (err, result) => {
+            if (err) {
+                console.error('Erro ao atualizar operação:', err);
+                return res.status(500).json({ error: 'Erro ao atualizar operação' });
+            }
+
+            // Atualizar o cache se necessário
+            if (operacaoAtiva && operacaoAtiva.id == id) {
+                // Buscar operação atualizada
+                connection.query('SELECT * FROM operacoes WHERE id = ?', [id], (selectErr, selectResults) => {
+                    if (!selectErr && selectResults.length > 0) {
+                        operacaoAtiva = normalizeOperacaoData(selectResults[0]);
+                    }
+                });
+            }
+
+            res.json({
+                message: 'Operação atualizada com sucesso',
+                updatedFields: Object.keys(updateFields)
+            });
+        });
     });
 });
 
@@ -421,7 +540,33 @@ app.get('/operacoes/:id', (req, res) => {
             return res.status(404).json({ error: 'Operação não encontrada' });
         }
 
-        res.json(results[0]);
+        // Normalizar dados antes de enviar
+        res.json(normalizeOperacaoData(results[0]));
+    });
+});
+
+// Rota GET - Resumo da operação
+app.get('/operacoes/:id/resumo', async (req, res) => {
+    const operacao_id = req.params.id;
+
+    // Exemplo usando callbacks aninhados, mas pode ser melhor com async/await e Promises
+    connection.query('SELECT * FROM operacoes WHERE id = ?', [operacao_id], (err, operacaoResults) => {
+        if (err || operacaoResults.length === 0) {
+            return res.status(404).json({ error: 'Operação não encontrada' });
+        }
+        const operacao = operacaoResults[0];
+
+        connection.query('SELECT * FROM mobilizacoes WHERE operacao_id = ?', [operacao_id], (err, mobilizacoes) => {
+            connection.query('SELECT * FROM desmobilizacoes WHERE operacao_id = ?', [operacao_id], (err, desmobilizacoes) => {
+                // ... repita para outras etapas ...
+                res.json({
+                    operacao,
+                    mobilizacoes,
+                    desmobilizacoes,
+                    // ...outras etapas...
+                });
+            });
+        });
     });
 });
 
@@ -455,13 +600,13 @@ app.post('/deslocamentos', verificarEquipeAtiva, verificarOperacaoOpcional, desl
 
             const query = `
                 INSERT INTO deslocamentos 
-                (equipe_id, operacao_id, origem, destino, km_inicial, observacoes) 
-                VALUES (?, ?, ?, ?, ?, ?)
+                (equipe_id, operacao_id, origem, destino, km_inicial, observacoes, status) 
+                VALUES (?, ?, ?, ?, ?, ?, 'EM_ANDAMENTO')
             `;
 
             connection.query(
                 query,
-                [equipeAtiva.id, operacao_id, origem, destino, km_inicial, observacoes],
+                [equipeAtiva.id, operacao_id, origem, destino, km_inicial, normalizeField(observacoes)],
                 (err, result) => {
                     if (err) {
                         console.error('Erro ao adicionar deslocamento:', err);
@@ -528,7 +673,7 @@ app.put('/deslocamentos/:id/finalizar', verificarEquipeAtiva, (req, res) => {
 
             connection.query(
                 updateQuery,
-                [km_final, observacoes, observacoes, id],
+                [km_final, normalizeField(observacoes), normalizeField(observacoes), id],
                 (updateErr, updateResult) => {
                     if (updateErr) {
                         console.error('Erro ao finalizar deslocamento:', updateErr);
@@ -557,15 +702,31 @@ app.get('/deslocamentos', (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
 
-    let queryParams = [limit, offset];
-    let whereClause = '';
+    let whereConditions = [];
+    let queryParams = [];
 
+    // Adicionar filtros se fornecidos
     if (operacao_id) {
-        whereClause = 'WHERE operacao_id = ?';
-        queryParams.unshift(operacao_id);
+        whereConditions.push('d.operacao_id = ?');
+        queryParams.push(operacao_id);
     }
 
-    const query = `SELECT * FROM deslocamentos ${whereClause} ORDER BY id DESC LIMIT ? OFFSET ?`;
+    const whereClause = whereConditions.length > 0
+        ? 'WHERE ' + whereConditions.join(' AND ')
+        : '';
+
+    // Consulta com JOIN para pegar também os dados da operação
+    const query = `
+        SELECT d.*, o.tipo_operacao, o.poco, o.cidade 
+        FROM deslocamentos d 
+        LEFT JOIN operacoes o ON d.operacao_id = o.id 
+        ${whereClause} 
+        ORDER BY d.hora_inicio DESC 
+        LIMIT ? OFFSET ?
+    `;
+
+    // Adicionar parâmetros de paginação
+    queryParams.push(limit, offset);
 
     connection.query(query, queryParams, (err, results) => {
         if (err) {
@@ -573,7 +734,15 @@ app.get('/deslocamentos', (req, res) => {
             return res.status(500).json({ error: 'Erro ao buscar deslocamentos' });
         }
 
-        res.json(results);
+        // Normalizar os dados de operação vinculados
+        const normalizedResults = results.map(result => {
+            if (result.poco === 'deslocamento sem operacao') {
+                result.poco = null;
+            }
+            return result;
+        });
+
+        res.json(normalizedResults);
     });
 });
 
@@ -613,7 +782,7 @@ app.post('/aguardos', verificarEquipeAtiva, verificarOperacaoOpcional, aguardoVa
 
             connection.query(
                 query,
-                [equipeAtiva.id, operacao_id, motivo, observacoes],
+                [equipeAtiva.id, operacao_id, motivo, normalizeField(observacoes)],
                 (err, result) => {
                     if (err) {
                         console.error('Erro ao adicionar aguardo:', err);
@@ -674,7 +843,7 @@ app.put('/aguardos/:id/finalizar', verificarEquipeAtiva, (req, res) => {
 
             connection.query(
                 updateQuery,
-                [tempoAguardo, observacoes, observacoes, id],
+                [tempoAguardo, normalizeField(observacoes), normalizeField(observacoes), id],
                 (updateErr, updateResult) => {
                     if (updateErr) {
                         console.error('Erro ao finalizar aguardo:', updateErr);
@@ -744,7 +913,15 @@ app.get('/aguardos', (req, res) => {
             return res.status(500).json({ error: 'Erro ao buscar aguardos' });
         }
 
-        res.json(results);
+        // Normalizar os dados de operação vinculados
+        const normalizedResults = results.map(result => {
+            if (result.poco === 'deslocamento sem operacao') {
+                result.poco = null;
+            }
+            return result;
+        });
+
+        res.json(normalizedResults);
     });
 });
 
@@ -770,6 +947,11 @@ app.get('/aguardos/ativo', (req, res) => {
 
         if (results.length === 0) {
             return res.status(404).json({ error: 'Nenhum aguardo ativo encontrado' });
+        }
+
+        // Normalizar os dados antes de enviar
+        if (results[0].poco === 'deslocamento sem operacao') {
+            results[0].poco = null;
         }
 
         res.json(results[0]);
@@ -806,7 +988,7 @@ app.post('/refeicoes', verificarEquipeAtiva, verificarOperacaoOpcional, (req, re
 
             connection.query(
                 query,
-                [equipeAtiva.id, operacao_id, observacoes],
+                [equipeAtiva.id, operacao_id, normalizeField(observacoes)],
                 (err, result) => {
                     if (err) {
                         console.error('Erro ao adicionar refeição:', err);
@@ -867,7 +1049,7 @@ app.put('/refeicoes/:id/finalizar', verificarEquipeAtiva, (req, res) => {
 
             connection.query(
                 updateQuery,
-                [tempoRefeicao, observacoes, observacoes, id],
+                [tempoRefeicao, normalizeField(observacoes), normalizeField(observacoes), id],
                 (updateErr, updateResult) => {
                     if (updateErr) {
                         console.error('Erro ao finalizar refeição:', updateErr);
@@ -937,7 +1119,15 @@ app.get('/refeicoes', (req, res) => {
             return res.status(500).json({ error: 'Erro ao buscar refeições' });
         }
 
-        res.json(results);
+        // Normalizar os dados antes de enviar
+        const normalizedResults = results.map(result => {
+            if (result.poco === 'deslocamento sem operacao') {
+                result.poco = null;
+            }
+            return result;
+        });
+
+        res.json(normalizedResults);
     });
 });
 
@@ -963,6 +1153,11 @@ app.get('/refeicoes/ativo', (req, res) => {
 
         if (results.length === 0) {
             return res.status(404).json({ error: 'Nenhuma refeição ativa encontrada' });
+        }
+
+        // Normalizar os dados antes de enviar
+        if (results[0].poco === 'deslocamento sem operacao') {
+            results[0].poco = null;
         }
 
         res.json(results[0]);
@@ -1006,7 +1201,7 @@ app.post('/abastecimentos', verificarEquipeAtiva, verificarOperacaoOpcional, aba
 
             connection.query(
                 query,
-                [equipeAtiva.id, operacao_id, tipo_abastecimento, observacoes],
+                [equipeAtiva.id, operacao_id, tipo_abastecimento, normalizeField(observacoes)],
                 (err, result) => {
                     if (err) {
                         console.error('Erro ao adicionar abastecimento:', err);
@@ -1067,7 +1262,7 @@ app.put('/abastecimentos/:id/finalizar', verificarEquipeAtiva, (req, res) => {
 
             connection.query(
                 updateQuery,
-                [tempoAbastecimento, observacoes, observacoes, id],
+                [tempoAbastecimento, normalizeField(observacoes), normalizeField(observacoes), id],
                 (updateErr, updateResult) => {
                     if (updateErr) {
                         console.error('Erro ao finalizar abastecimento:', updateErr);
@@ -1143,7 +1338,15 @@ app.get('/abastecimentos', (req, res) => {
             return res.status(500).json({ error: 'Erro ao buscar abastecimentos' });
         }
 
-        res.json(results);
+        // Normalizar os dados antes de enviar
+        const normalizedResults = results.map(result => {
+            if (result.poco === 'deslocamento sem operacao') {
+                result.poco = null;
+            }
+            return result;
+        });
+
+        res.json(normalizedResults);
     });
 });
 
@@ -1171,6 +1374,11 @@ app.get('/abastecimentos/ativo', (req, res) => {
             return res.status(404).json({ error: 'Nenhum abastecimento ativo encontrado' });
         }
 
+        // Normalizar os dados antes de enviar
+        if (results[0].poco === 'deslocamento sem operacao') {
+            results[0].poco = null;
+        }
+
         res.json(results[0]);
     });
 });
@@ -1196,7 +1404,56 @@ app.get('/abastecimentos/:id', (req, res) => {
             return res.status(404).json({ error: 'Abastecimento não encontrado' });
         }
 
+        // Normalizar os dados antes de enviar
+        if (results[0].poco === 'deslocamento sem operacao') {
+            results[0].poco = null;
+        }
+
         res.json(results[0]);
+    });
+});
+
+// POST - Salvar mobilização
+app.post('/mobilizacoes', verificarEquipeAtiva, (req, res) => {
+    const { operacao_id, data_inicio, data_fim, observacoes } = req.body;
+    const query = `
+        INSERT INTO mobilizacoes (operacao_id, data_inicio, data_fim, observacoes)
+        VALUES (?, ?, ?, ?)
+    `;
+    connection.query(query, [operacao_id, data_inicio, data_fim, observacoes], (err, result) => {
+        if (err) {
+            console.error('Erro ao salvar mobilização:', err);
+            return res.status(500).json({ error: 'Erro ao salvar mobilização' });
+        }
+        res.status(201).json({ id: result.insertId, operacao_id, data_inicio, data_fim, observacoes });
+    });
+});
+
+// GET - Buscar mobilizações por operação
+app.get('/mobilizacoes', (req, res) => {
+    const { operacao_id } = req.query;
+    let query = 'SELECT * FROM mobilizacoes';
+    let params = [];
+    if (operacao_id) {
+        query += ' WHERE operacao_id = ?';
+        params.push(operacao_id);
+    }
+    connection.query(query, params, (err, results) => {
+        if (err) {
+            console.error('Erro ao buscar mobilizações:', err);
+            return res.status(500).json({ error: 'Erro ao buscar mobilizações' });
+        }
+        res.json(results);
+    });
+});
+
+// Endpoint de saúde para monitoramento
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date(),
+        equipe_ativa: equipeAtiva ? 'sim' : 'não',
+        operacao_ativa: operacaoAtiva ? 'sim' : 'não'
     });
 });
 

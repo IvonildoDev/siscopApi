@@ -8,11 +8,15 @@ import {
     TouchableOpacity,
     Modal,
     TextInput,
-    Platform
+    Platform,
+    Alert
 } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 
 // URL da API
 const API_URL = 'http://192.168.1.106:3000';
@@ -107,7 +111,7 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     data: new Date(des.hora_inicio),
                     dataString: new Date(des.hora_inicio).toLocaleDateString(),
                     titulo: `Deslocamento: ${des.origem} → ${des.destino}`,
-                    descricao: `Distância: ${des.km_final ? (des.km_final - des.km_inicial).toFixed(1) : 'N/A'} km`,
+                    descricao: `Distância: ${des.km_final ? (des.km_final - des.km_inicial).toFixed(1) : 'N/A'} km | KM inicial: ${des.km_inicial || 'N/A'} | KM final: ${des.km_final || 'N/A'}`,
                     status: des.status,
                     icone: 'navigate',
                     cor: '#2196F3',
@@ -262,7 +266,9 @@ export default function ResumoAtividadesScreen({ navigation }) {
                 <Text style={styles.itemData}>
                     <Ionicons name="calendar" size={14} color="#666" /> {new Date(item.data).toLocaleString()}
                 </Text>
-                {item.tempo > 0 && (
+
+                {/* Mostra o tempo apenas se não for operação */}
+                {item.tipo !== 'operacao' && item.tempo > 0 && (
                     <Text style={styles.itemTempo}>
                         <Ionicons name="time-outline" size={14} color="#666" /> {formatarTempo(item.tempo)}
                     </Text>
@@ -321,6 +327,414 @@ export default function ResumoAtividadesScreen({ navigation }) {
             />
         </View>
     );
+
+    // Função para gerar e compartilhar o PDF de resumo
+    const gerarRelatorioPDF = async () => {
+        try {
+            setLoading(true);
+
+            // Buscar dados adicionais da equipe para o relatório
+            let equipeData = equipeAtiva || {};
+
+            // Filtramos as atividades de acordo com os filtros aplicados
+            const atividadesParaRelatorio = atividadesFiltradas;
+
+            // Agrupar por tipo
+            const operacoes = atividadesParaRelatorio.filter(a => a.tipo === 'operacao');
+            const deslocamentos = atividadesParaRelatorio.filter(a => a.tipo === 'deslocamento');
+            const aguardos = atividadesParaRelatorio.filter(a => a.tipo === 'aguardo');
+            const refeicoes = atividadesParaRelatorio.filter(a => a.tipo === 'refeicao');
+            const abastecimentos = atividadesParaRelatorio.filter(a => a.tipo === 'abastecimento');
+
+            // Calcular totais
+            const totalOperacoes = operacoes.length;
+            const totalDeslocamentos = deslocamentos.length;
+            const totalAguardos = aguardos.length;
+            const totalRefeicoes = refeicoes.length;
+            const totalAbastecimentos = abastecimentos.length;
+
+            // Somar tempos totais
+            const somarTempo = (items) => {
+                return items.reduce((total, item) => total + (item.tempo || 0), 0);
+            };
+
+            const tempoTotalOperacoes = somarTempo(operacoes);
+            const tempoTotalDeslocamentos = somarTempo(deslocamentos);
+            const tempoTotalAguardos = somarTempo(aguardos);
+            const tempoTotalRefeicoes = somarTempo(refeicoes);
+            const tempoTotalAbastecimentos = somarTempo(abastecimentos);
+            const tempoTotalGeral = tempoTotalOperacoes + tempoTotalDeslocamentos +
+                tempoTotalAguardos + tempoTotalRefeicoes + tempoTotalAbastecimentos;
+
+            // Gerar HTML para o PDF
+            const titulo = filtroAtivo
+                ? `Relatório de Atividades - ${dataFiltro.toLocaleDateString()}`
+                : 'Relatório Geral de Atividades';
+
+            // Função para gerar tabela de atividades
+            const gerarTabelaAtividades = (atividades, tipoNome) => {
+                if (atividades.length === 0) return `<p>Nenhum(a) ${tipoNome} registrado(a).</p>`;
+
+                // Verificar se é tabela de operações (para ocultar coluna de tempo)
+                const mostrarTempo = tipoNome !== 'operação';
+
+                // Função para adicionar informações extras específicas para cada tipo
+                const gerarInfoExtra = (atividade) => {
+                    if (atividade.tipo === 'deslocamento') {
+                        return `
+                        <div class="info-extra">
+                            <div class="info-item">
+                                <span class="info-label">KM Inicial:</span> 
+                                <span class="info-value">${atividade.km_inicial || 'N/A'}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">KM Final:</span> 
+                                <span class="info-value">${atividade.km_final || 'N/A'}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Distância:</span> 
+                                <span class="info-value">${atividade.km_final ? (atividade.km_final - atividade.km_inicial).toFixed(1) : 'N/A'} km</span>
+                            </div>
+                        </div>`;
+                    }
+                    return '';
+                };
+
+                return `
+                <div class="tabela-container">
+                    <table class="tabela-atividades">
+                        <thead>
+                            <tr>
+                                <th>Data/Hora</th>
+                                <th>Descrição</th>
+                                <th>Status</th>
+                                ${mostrarTempo ? '<th>Tempo</th>' : ''}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${atividades.map(a => `
+                                <tr>
+                                    <td>${new Date(a.data).toLocaleString()}</td>
+                                    <td>
+                                        <strong>${a.titulo}</strong>
+                                        <div class="descricao">${a.descricao}</div>
+                                        ${gerarInfoExtra(a)}
+                                    </td>
+                                    <td>${a.status === 'EM_ANDAMENTO' ? 'Em andamento' :
+                        a.status === 'FINALIZADO' ? 'Finalizado' : a.status}</td>
+                                    ${mostrarTempo ? `<td>${formatarTempo(a.tempo || 0)}</td>` : ''}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
+            };
+
+            const htmlContent = `
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>UCAQ - ${titulo}</title>
+                  <style>
+                    body {
+                      font-family: Helvetica, Arial, sans-serif;
+                      padding: 20px;
+                      color: #333;
+                    }
+                    .header {
+                      text-align: center;
+                      margin-bottom: 30px;
+                      border-bottom: 2px solid #4CAF50;
+                      padding-bottom: 10px;
+                    }
+                    .header h1 {
+                      color: #4CAF50;
+                      margin: 0 0 10px 0;
+                    }
+                    .equipe-info {
+                      background-color: #f9f9f9;
+                      border-radius: 5px;
+                      padding: 15px;
+                      margin-bottom: 20px;
+                    }
+                    .equipe-titulo {
+                      font-weight: bold;
+                      font-size: 18px;
+                      margin-bottom: 10px;
+                      color: #333;
+                    }
+                    .equipe-detalhe {
+                      margin-bottom: 5px;
+                    }
+                    .equipe-label {
+                      font-weight: bold;
+                      color: #555;
+                    }
+                    .secao {
+                      margin: 25px 0;
+                    }
+                    h2 {
+                      color: #2E7D32;
+                      border-bottom: 1px solid #ddd;
+                      padding-bottom: 5px;
+                    }
+                    .resumo-cards {
+                      display: flex;
+                      flex-wrap: wrap;
+                      gap: 15px;
+                      margin-bottom: 20px;
+                    }
+                    .resumo-card {
+                      background-color: #f5f5f5;
+                      border-radius: 5px;
+                      padding: 15px;
+                      width: calc(33% - 10px);
+                      box-sizing: border-box;
+                      text-align: center;
+                    }
+                    .resumo-valor {
+                      font-size: 24px;
+                      font-weight: bold;
+                      color: #4CAF50;
+                      margin: 5px 0;
+                    }
+                    .resumo-titulo {
+                      font-size: 14px;
+                      color: #666;
+                    }
+                    .resumo-tempo {
+                      font-size: 12px;
+                      color: #888;
+                      margin-top: 5px;
+                    }
+                    .tabela-container {
+                      overflow-x: auto;
+                      margin-top: 10px;
+                    }
+                    .tabela-atividades {
+                      width: 100%;
+                      border-collapse: collapse;
+                      margin-bottom: 20px;
+                    }
+                    .tabela-atividades th, .tabela-atividades td {
+                      padding: 10px;
+                      text-align: left;
+                      border-bottom: 1px solid #ddd;
+                    }
+                    .tabela-atividades th {
+                      background-color: #f5f5f5;
+                      font-weight: bold;
+                    }
+                    .descricao {
+                      font-size: 12px;
+                      color: #666;
+                      margin-top: 3px;
+                    }
+                    .footer {
+                      margin-top: 40px;
+                      text-align: center;
+                      font-size: 12px;
+                      color: #999;
+                      padding-top: 10px;
+                      border-top: 1px solid #eee;
+                    }
+                    .total-geral {
+                      background-color: #E8F5E9;
+                      padding: 15px;
+                      text-align: center;
+                      border-radius: 5px;
+                      margin: 20px 0;
+                    }
+                    .tempo-total {
+                      font-size: 22px;
+                      font-weight: bold;
+                      color: #2E7D32;
+                    }
+                    @media print {
+                      .no-print {
+                        display: none;
+                      }
+                    }
+                    
+                    .info-extra {
+                      margin-top: 8px;
+                      padding: 5px;
+                      background-color: #f9f9f9;
+                      border-radius: 4px;
+                      font-size: 12px;
+                    }
+                    
+                    .info-item {
+                      display: inline-block;
+                      margin-right: 15px;
+                    }
+                    
+                    .info-label {
+                      font-weight: bold;
+                      color: #555;
+                    }
+                    
+                    .info-value {
+                      color: #333;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="header">
+                    <h1>UCAQ - ${titulo}</h1>
+                    <div>${filtroAtivo
+                    ? `Data: ${dataFiltro.toLocaleDateString()}`
+                    : `Período: Todas as atividades registradas`}
+                    </div>
+                  </div>
+                  
+                  ${equipeData.id ? `
+                  <div class="equipe-info">
+                    <div class="equipe-titulo">Informações da Equipe</div>
+                    <div class="equipe-detalhe"><span class="equipe-label">Operador:</span> ${equipeData.operador || 'N/A'}</div>
+                    <div class="equipe-detalhe"><span class="equipe-label">Auxiliar:</span> ${equipeData.auxiliar || 'N/A'}</div>
+                    <div class="equipe-detalhe"><span class="equipe-label">Unidade:</span> ${equipeData.unidade || 'N/A'}</div>
+                    <div class="equipe-detalhe"><span class="equipe-label">Placa do Veículo:</span> ${equipeData.placa || 'N/A'}</div>
+                  </div>
+                  ` : `
+                  <div class="equipe-info">
+                    <div class="equipe-titulo">Equipe</div>
+                    <div>Nenhuma equipe ativa no momento.</div>
+                  </div>
+                  `}
+                  
+                  <div class="secao">
+                    <h2>Resumo das Atividades</h2>
+                    <div class="resumo-cards">
+                      <div class="resumo-card">
+                        <div class="resumo-titulo">Operações</div>
+                        <div class="resumo-valor">${totalOperacoes}</div>
+                        <div class="resumo-tempo">Tempo total: ${formatarTempo(tempoTotalOperacoes)}</div>
+                      </div>
+                      <div class="resumo-card">
+                        <div class="resumo-titulo">Deslocamentos</div>
+                        <div class="resumo-valor">${totalDeslocamentos}</div>
+                        <div class="resumo-tempo">Tempo total: ${formatarTempo(tempoTotalDeslocamentos)}</div>
+                      </div>
+                      <div class="resumo-card">
+                        <div class="resumo-titulo">Aguardos</div>
+                        <div class="resumo-valor">${totalAguardos}</div>
+                        <div class="resumo-tempo">Tempo total: ${formatarTempo(tempoTotalAguardos)}</div>
+                      </div>
+                      <div class="resumo-card">
+                        <div class="resumo-titulo">Refeições</div>
+                        <div class="resumo-valor">${totalRefeicoes}</div>
+                        <div class="resumo-tempo">Tempo total: ${formatarTempo(tempoTotalRefeicoes)}</div>
+                      </div>
+                      <div class="resumo-card">
+                        <div class="resumo-titulo">Abastecimentos</div>
+                        <div class="resumo-valor">${totalAbastecimentos}</div>
+                        <div class="resumo-tempo">Tempo total: ${formatarTempo(tempoTotalAbastecimentos)}</div>
+                      </div>
+                      <div class="resumo-card">
+                        <div class="resumo-titulo">Total de Atividades</div>
+                        <div class="resumo-valor">${atividadesParaRelatorio.length}</div>
+                      </div>
+                    </div>
+                    
+                    <div class="total-geral">
+                      <div>Tempo Total de Todas as Atividades</div>
+                      <div class="tempo-total">${formatarTempo(tempoTotalGeral)}</div>
+                    </div>
+                  </div>
+                  
+                  <div class="secao">
+                    <h2>Operações</h2>
+                    ${gerarTabelaAtividades(operacoes, 'operação')}
+                  </div>
+                  
+                  <div class="secao">
+                    <h2>Deslocamentos</h2>
+                    ${gerarTabelaDeslocamentos(deslocamentos)}
+                  </div>
+                  
+                  <div class="secao">
+                    <h2>Aguardos</h2>
+                    ${gerarTabelaAtividades(aguardos, 'aguardo')}
+                  </div>
+                  
+                  <div class="secao">
+                    <h2>Refeições</h2>
+                    ${gerarTabelaAtividades(refeicoes, 'refeição')}
+                  </div>
+                  
+                  <div class="secao">
+                    <h2>Abastecimentos</h2>
+                    ${gerarTabelaAtividades(abastecimentos, 'abastecimento')}
+                  </div>
+                  
+                  <div class="footer">
+                    <p>Relatório gerado em ${new Date().toLocaleString()}</p>
+                    <p>Este é um documento gerado automaticamente pelo aplicativo SICOP.</p>
+                  </div>
+                </body>
+              </html>
+            `;
+
+            // Gerar o PDF usando expo-print
+            const { uri } = await Print.printToFileAsync({
+                html: htmlContent,
+                base64: false
+            });
+
+            // Formatar data no formato DD-MM-YYYY para o nome do arquivo
+            const dataAtual = new Date();
+            const dia = String(dataAtual.getDate()).padStart(2, '0');
+            const mes = String(dataAtual.getMonth() + 1).padStart(2, '0');
+            const ano = dataAtual.getFullYear();
+            const dataFormatada = `${dia}-${mes}-${ano}`;
+
+            // Nome do arquivo no formato solicitado: UCAQ_DD-MM-YYYY.pdf
+            const nomeArquivo = `UCAQ_${dataFormatada}.pdf`;
+
+            // Criar um arquivo temporário com o nome personalizado
+            const novoCaminho = `${FileSystem.cacheDirectory}${nomeArquivo}`;
+
+            // Copiar o arquivo gerado para o novo caminho com nome personalizado
+            await FileSystem.copyAsync({
+                from: uri,
+                to: novoCaminho
+            });
+
+            // Verificar se o compartilhamento está disponível
+            const isAvailable = await Sharing.isAvailableAsync();
+            if (isAvailable) {
+                // Compartilhar o PDF com o nome personalizado
+                await Sharing.shareAsync(novoCaminho, {
+                    mimeType: 'application/pdf',
+                    dialogTitle: 'Compartilhar Relatório UCAQ',
+                    UTI: 'com.adobe.pdf'
+                });
+            } else {
+                // Mostrar mensagem caso o compartilhamento não esteja disponível
+                Alert.alert(
+                    'Erro',
+                    'Compartilhamento não está disponível neste dispositivo'
+                );
+            }
+
+            // Limpar arquivos temporários após compartilhar
+            try {
+                await FileSystem.deleteAsync(uri);
+            } catch (err) {
+                console.log('Erro ao limpar arquivo temporário original');
+            }
+        } catch (error) {
+            console.error('Erro ao gerar PDF:', error);
+            Alert.alert(
+                'Erro',
+                'Não foi possível gerar o relatório em PDF. Por favor, tente novamente.'
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
 
     // Tela de carregamento
     if (loading) {
@@ -405,14 +819,6 @@ export default function ResumoAtividadesScreen({ navigation }) {
             {/* Filtros de tipo */}
             {renderizarFiltrosTipo()}
 
-            {/* Mensagem de erro */}
-            {error && (
-                <View style={styles.errorContainer}>
-                    <Ionicons name="alert-circle" size={24} color="#D32F2F" />
-                    <Text style={styles.errorText}>{error}</Text>
-                </View>
-            )}
-
             {/* Lista de atividades */}
             {atividadesFiltradas.length > 0 ? (
                 <FlatList
@@ -432,6 +838,22 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     </Text>
                 </View>
             )}
+
+            {/* Botão flutuante de exportar PDF */}
+            <TouchableOpacity
+                style={styles.botaoFlutuante}
+                onPress={gerarRelatorioPDF}
+            >
+                <Ionicons name="share-outline" size={24} color="#FFF" />
+            </TouchableOpacity>
+
+            {/* Botão flutuante para filtros avançados */}
+            <TouchableOpacity
+                style={[styles.botaoFlutuanteSecundario]}
+                onPress={() => {/* Implementar filtros avançados */ }}
+            >
+                <Ionicons name="filter-outline" size={24} color="#FFF" />
+            </TouchableOpacity>
         </View>
     );
 }
@@ -680,5 +1102,39 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#666',
         textAlign: 'center',
+    },
+    botaoFlutuante: {
+        position: 'absolute',
+        right: 20,
+        bottom: 20,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#4CAF50',
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+        zIndex: 999,
+    },
+    botaoFlutuanteSecundario: {
+        position: 'absolute',
+        right: 20,
+        bottom: 86, // Posicionado acima do primeiro botão
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#2196F3',
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+        zIndex: 999,
     },
 });
