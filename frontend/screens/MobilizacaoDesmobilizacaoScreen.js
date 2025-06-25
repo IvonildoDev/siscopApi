@@ -180,25 +180,58 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
     };
 
     // Iniciar mobilização
+    const [mobilizacaoId, setMobilizacaoId] = useState(null);
+
     const iniciarMobilizacao = async () => {
         setLoading(true);
         try {
-            if (!operacaoAtiva || !operacaoAtiva.id || !operacaoAtiva.equipe_id) {
-                setError('Operação ou equipe não encontrada');
+            // Buscar equipe ativa primeiro
+            const equipeResponse = await axios.get(`${API_URL}/equipes/ativa`);
+            const equipeAtiva = equipeResponse.data;
+
+            if (!equipeAtiva || !equipeAtiva.id) {
+                setError('Equipe não encontrada');
                 setLoading(false);
                 return;
             }
-            await axios.post(`${API_URL}/mobilizacoes`, {
-                operacao_id: operacaoAtiva.id,
-                equipe_id: operacaoAtiva.equipe_id,
-                hora_inicio_mobilizacao: new Date().toISOString(),
+
+            console.log('equipeAtiva:', equipeAtiva);
+
+            // Definir hora de início ANTES de calcular tempo
+            const horaInicio = new Date();
+            setInicioMobilizacao(horaInicio);
+
+            // Salvar mobilização inicial (só com hora_inicio)
+            const dataInicial = {
+                equipe_id: equipeAtiva.id,
+                hora_inicio_mobilizacao: horaInicio.toISOString(),
                 hora_fim_mobilizacao: null,
                 tempo_mobilizacao: null,
                 observacoes: observacoesMobilizacao || ''
-            });
+            };
+
+            console.log('Enviando dados iniciais da mobilização:', dataInicial);
+
+            // 1. Salva a mobilização inicial
+            const response = await axios.post(`${API_URL}/mobilizacoes`, dataInicial);
+            setMobilizacaoId(response.data.id);
+            console.log('Resposta do backend (mobilização):', JSON.stringify(response.data, null, 2));
+
+            // 2. Se existe operação ativa, atualiza ela também
+            if (operacaoAtiva && operacaoAtiva.id) {
+                await axios.put(`${API_URL}/operacoes/${operacaoAtiva.id}`, {
+                    etapa_atual: 'MOBILIZACAO',
+                    inicio_mobilizacao: horaInicio.toISOString()
+                });
+            }
+
+            setEtapaAtual('MOBILIZACAO');
+            setTempoMobilizacao(0);
+
             Alert.alert('Mobilização iniciada!');
         } catch (err) {
-            setError('Erro ao iniciar mobilização');
+            console.log('Erro ao iniciar mobilização:', err);
+            setError('Erro ao iniciar mobilização: ' + (err.response?.data?.error || err.message));
         } finally {
             setLoading(false);
         }
@@ -208,17 +241,54 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
     const finalizarMobilizacao = async () => {
         setLoading(true);
         try {
+            // Buscar equipe ativa primeiro
+            const equipeResponse = await axios.get(`${API_URL}/equipes/ativa`);
+            const equipeAtiva = equipeResponse.data;
+
+            if (!equipeAtiva || !equipeAtiva.id) {
+                setError('Equipe não encontrada');
+                setLoading(false);
+                return;
+            }
+
+            // Calcular tempo decorrido
+            const agora = new Date();
+            const tempoDecorrido = Math.floor((agora - inicioMobilizacao) / 1000); // segundos
+
+            console.log('=== DEBUG FINALIZAR MOBILIZAÇÃO ===');
+            console.log('inicioMobilizacao:', inicioMobilizacao);
+            console.log('agora:', agora);
+            console.log('Diferença em milissegundos:', agora - inicioMobilizacao);
+            console.log('tempoDecorrido calculado:', tempoDecorrido);
+            console.log('tempoDecorrido em segundos:', tempoDecorrido);
+            console.log('tempoDecorrido em minutos:', Math.floor(tempoDecorrido / 60));
+            console.log('====================================');
+
+            // Atualizar a mobilização com hora_fim e tempo
             const data = {
-                fim_mobilizacao: new Date().toISOString(),
-                tempo_mobilizacao: tempoMobilizacao,
-                observacoes: observacoesMobilizacao,
-                checklist: itensChecklistMob,
-                status: 'MOBILIZACAO_CONCLUIDA'
+                equipe_id: equipeAtiva.id,
+                hora_inicio_mobilizacao: inicioMobilizacao ? inicioMobilizacao.toISOString() : new Date().toISOString(),
+                hora_fim_mobilizacao: agora.toISOString(),
+                tempo_mobilizacao: tempoDecorrido,
+                observacoes: observacoesMobilizacao || ''
             };
-            await axios.put(`${API_URL}/mobilizacoes/${mobilizacaoId}`, data); // endpoint só de mobilização
-            Alert.alert('Mobilização finalizada!');
+
+            console.log('Enviando dados da mobilização para o backend:', JSON.stringify(data, null, 2));
+            console.log('Tempo decorrido em segundos:', tempoDecorrido);
+            console.log('Tipo do tempoDecorrido:', typeof tempoDecorrido);
+
+            // Como não temos rota PUT, vamos criar um novo registro ou atualizar via SQL direto
+            // Por enquanto, vamos criar um novo registro com os dados completos
+            const response = await axios.post(`${API_URL}/mobilizacoes`, data);
+            console.log('Resposta do backend (mobilização):', JSON.stringify(response.data, null, 2));
+
+            setFimMobilizacao(agora);
+            setTempoMobilizacao(tempoDecorrido);
+
+            Alert.alert('Mobilização finalizada!', `Tempo total: ${formatarTempo(tempoDecorrido)}`);
         } catch (err) {
-            setError('Erro ao finalizar mobilização');
+            console.log('Erro ao finalizar mobilização:', err);
+            setError('Erro ao finalizar mobilização: ' + (err.response?.data?.error || err.message));
         } finally {
             setLoading(false);
         }
@@ -226,44 +296,52 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
 
     // Iniciar desmobilização
     const iniciarDesmobilizacao = async () => {
-        if (!kmInicial) {
-            setError('Informe a quilometragem inicial');
-            return;
-        }
-
         try {
             setLoading(true);
             setError(null);
 
-            if (!operacaoAtiva || !operacaoAtiva.id || !operacaoAtiva.equipe_id) {
-                setError('Operação ou equipe não encontrada');
+            // Buscar equipe ativa primeiro
+            const equipeResponse = await axios.get(`${API_URL}/equipes/ativa`);
+            const equipeAtiva = equipeResponse.data;
+
+            if (!equipeAtiva || !equipeAtiva.id) {
+                setError('Equipe não encontrada');
                 setLoading(false);
                 return;
             }
 
-            const dataOperacao = {
-                etapa_atual: 'DESMOBILIZACAO',
-                inicio_desmobilizacao: new Date().toISOString(),
-                km_inicial_desmobilizacao: parseFloat(kmInicial)
-            };
+            // Definir hora de início ANTES de salvar
+            const horaInicio = new Date();
+            setInicioDesmobilizacao(horaInicio);
 
-            await axios.put(`${API_URL}/operacoes/${operacaoAtiva.id}`, dataOperacao);
+            // Se existe operação ativa, atualiza ela
+            if (operacaoAtiva && operacaoAtiva.id) {
+                const dataOperacao = {
+                    etapa_atual: 'DESMOBILIZACAO',
+                    inicio_desmobilizacao: horaInicio.toISOString(),
+                    km_inicial_desmobilizacao: kmInicial ? parseFloat(kmInicial) : null
+                };
+                await axios.put(`${API_URL}/operacoes/${operacaoAtiva.id}`, dataOperacao);
+            }
 
             setEtapaAtual('DESMOBILIZACAO');
-            setInicioDesmobilizacao(new Date());
             setTempoDesmobilizacao(0);
 
-            await axios.post(`${API_URL}/desmobilizacoes`, {
-                operacao_id: operacaoAtiva.id,
-                equipe_id: operacaoAtiva.equipe_id,
-                hora_inicio_desmobilizacao: new Date().toISOString(),
+            // Salva desmobilização inicial (só com hora_inicio)
+            const dataInicial = {
+                equipe_id: equipeAtiva.id,
+                hora_inicio_desmobilizacao: horaInicio.toISOString(),
                 hora_fim_desmobilizacao: null,
                 tempo_desmobilizacao: null,
                 observacoes: observacoesDesmobilizacao || ''
-            });
+            };
+
+            console.log('Enviando dados iniciais da desmobilização:', dataInicial);
+            await axios.post(`${API_URL}/desmobilizacoes`, dataInicial);
 
             Alert.alert('Desmobilização Iniciada', 'A equipe está realizando a desmobilização do equipamento.');
         } catch (err) {
+            console.log('Erro ao iniciar desmobilização:', err);
             tratarErro(err, 'Erro ao iniciar desmobilização');
         } finally {
             setLoading(false);
@@ -272,55 +350,74 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
 
     // Finalizar desmobilização
     const finalizarDesmobilizacao = async () => {
-        if (!kmFinal) {
-            setError('Informe a quilometragem final');
-            return;
-        }
-
-        if (!checklistDesConcluido) {
-            Alert.alert(
-                'Checklist Incompleto',
-                'É necessário completar o checklist antes de finalizar a desmobilização.',
-                [{ text: 'OK' }]
-            );
-            return;
-        }
-
         try {
             setLoading(true);
             setError(null);
 
-            const dataOperacao = {
-                etapa_atual: 'FINALIZADO',
-                fim_desmobilizacao: new Date().toISOString(),
-                tempo_desmobilizacao: tempoDesmobilizacao,
-                observacoes_desmobilizacao: observacoesDesmobilizacao,
-                km_final_desmobilizacao: parseFloat(kmFinal)
+            // Buscar equipe ativa primeiro
+            const equipeResponse = await axios.get(`${API_URL}/equipes/ativa`);
+            const equipeAtiva = equipeResponse.data;
+
+            if (!equipeAtiva || !equipeAtiva.id) {
+                setError('Equipe não encontrada');
+                setLoading(false);
+                return;
+            }
+
+            // Calcular tempo decorrido
+            const agora = new Date();
+            const tempoDecorrido = Math.floor((agora - inicioDesmobilizacao) / 1000); // segundos
+
+            console.log('=== DEBUG FINALIZAR DESMOBILIZAÇÃO ===');
+            console.log('inicioDesmobilizacao:', inicioDesmobilizacao);
+            console.log('agora:', agora);
+            console.log('Diferença em milissegundos:', agora - inicioDesmobilizacao);
+            console.log('tempoDecorrido calculado:', tempoDecorrido);
+            console.log('tempoDecorrido em segundos:', tempoDecorrido);
+            console.log('tempoDecorrido em minutos:', Math.floor(tempoDecorrido / 60));
+            console.log('=======================================');
+
+            // Se existe operação ativa, atualiza ela
+            if (operacaoAtiva && operacaoAtiva.id) {
+                const dataOperacao = {
+                    etapa_atual: 'FINALIZADO',
+                    fim_desmobilizacao: agora.toISOString(),
+                    tempo_desmobilizacao: tempoDecorrido,
+                    observacoes_desmobilizacao: observacoesDesmobilizacao,
+                    km_final_desmobilizacao: kmFinal ? parseFloat(kmFinal) : null
+                };
+                await axios.put(`${API_URL}/operacoes/${operacaoAtiva.id}`, dataOperacao);
+            }
+
+            // Atualizar a desmobilização com hora_fim e tempo
+            const data = {
+                equipe_id: equipeAtiva.id,
+                hora_inicio_desmobilizacao: inicioDesmobilizacao ? inicioDesmobilizacao.toISOString() : new Date().toISOString(),
+                hora_fim_desmobilizacao: agora.toISOString(),
+                tempo_desmobilizacao: tempoDecorrido, // Este é o tempo em segundos, não timestamp
+                observacoes: observacoesDesmobilizacao || ''
             };
 
-            // Atualiza a operação
-            await axios.put(`${API_URL}/operacoes/${operacaoAtiva.id}`, dataOperacao);
+            console.log('Enviando dados da desmobilização para o backend:', JSON.stringify(data, null, 2));
+            console.log('Tempo decorrido em segundos:', tempoDecorrido);
+            console.log('Tipo do tempoDecorrido:', typeof tempoDecorrido);
 
-            // SALVA a desmobilização na tabela desmobilizacoes
-            await axios.post(`${API_URL}/desmobilizacoes`, {
-                operacao_id: operacaoAtiva.id,
-                equipe_id: operacaoAtiva.equipe_id,
-                hora_inicio_desmobilizacao: inicioDesmobilizacao ? inicioDesmobilizacao.toISOString() : new Date().toISOString(),
-                hora_fim_desmobilizacao: new Date().toISOString(),
-                tempo_desmobilizacao: tempoDesmobilizacao,
-                observacoes: observacoesDesmobilizacao
-            });
+            // Como não temos rota PUT, vamos criar um novo registro com os dados completos
+            const response = await axios.post(`${API_URL}/desmobilizacoes`, data);
+            console.log('Resposta do backend (desmobilização):', JSON.stringify(response.data, null, 2));
 
             // Atualizar estado
             setEtapaAtual('FINALIZADO');
-            setFimDesmobilizacao(new Date());
+            setFimDesmobilizacao(agora);
+            setTempoDesmobilizacao(tempoDecorrido);
 
             Alert.alert(
                 'Desmobilização Finalizada',
-                `Desmobilização concluída em ${formatarTempo(tempoDesmobilizacao)}.`,
+                `Desmobilização concluída em ${formatarTempo(tempoDecorrido)}.`,
                 [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
             );
         } catch (err) {
+            console.log('Erro ao finalizar desmobilização:', err);
             tratarErro(err, 'Erro ao finalizar desmobilização');
         } finally {
             setLoading(false);
@@ -444,7 +541,7 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
     };
 
     // Finalizar atividade
-    const finalizarAtividade = () => {
+    const finalizarAtividade = async () => {
         if (!atividadeIniciada || !inicioAtividade) {
             Alert.alert('Atenção', 'Inicie a atividade primeiro.');
             return;
@@ -452,9 +549,96 @@ export default function MobilizacaoDesmobilizacaoScreen({ navigation }) {
         const agora = new Date();
         setFimAtividade(agora);
         const duracao = Math.round((agora - inicioAtividade) / 60000); // minutos
+        const duracaoSegundos = Math.floor((agora - inicioAtividade) / 1000); // segundos
         setDuracaoAtividade(duracao);
         setAtividadeIniciada(false);
-        Alert.alert('Atividade finalizada', `Duração: ${duracao} minutos`);
+
+        // Salvar no backend baseado no tipo de atividade
+        try {
+            if (modalTipo === 'mobilizacao') {
+                // Salvar mobilização com tempo calculado do modal
+                await salvarMobilizacaoCompleta(inicioAtividade, agora, duracaoSegundos);
+            } else if (modalTipo === 'desmobilizacao') {
+                // Salvar desmobilização com tempo calculado do modal
+                await salvarDesmobilizacaoCompleta(inicioAtividade, agora, duracaoSegundos);
+            }
+            Alert.alert('Atividade finalizada e salva', `Duração: ${duracao} minutos`);
+        } catch (error) {
+            console.error('Erro ao salvar atividade:', error);
+            Alert.alert('Erro', 'Atividade finalizada mas não foi possível salvar no servidor.');
+        }
+    };
+
+    // Função para salvar mobilização completa
+    const salvarMobilizacaoCompleta = async (inicio, fim, tempoSegundos) => {
+        try {
+            // Buscar equipe ativa
+            const equipeResponse = await axios.get(`${API_URL}/equipes/ativa`);
+            const equipeAtiva = equipeResponse.data;
+
+            if (!equipeAtiva || !equipeAtiva.id) {
+                throw new Error('Equipe não encontrada');
+            }
+
+            console.log('=== SALVANDO MOBILIZAÇÃO COMPLETA ===');
+            console.log('inicio:', inicio);
+            console.log('fim:', fim);
+            console.log('tempoSegundos:', tempoSegundos);
+
+            const data = {
+                equipe_id: equipeAtiva.id,
+                hora_inicio_mobilizacao: inicio.toISOString(),
+                hora_fim_mobilizacao: fim.toISOString(),
+                tempo_mobilizacao: tempoSegundos,
+                observacoes: observacoesMobilizacao || ''
+            };
+
+            console.log('Dados enviados para mobilização:', JSON.stringify(data, null, 2));
+
+            const response = await axios.post(`${API_URL}/mobilizacoes`, data);
+            console.log('Resposta do backend (mobilização):', JSON.stringify(response.data, null, 2));
+
+            return response.data;
+        } catch (error) {
+            console.error('Erro ao salvar mobilização completa:', error);
+            throw error;
+        }
+    };
+
+    // Função para salvar desmobilização completa
+    const salvarDesmobilizacaoCompleta = async (inicio, fim, tempoSegundos) => {
+        try {
+            // Buscar equipe ativa
+            const equipeResponse = await axios.get(`${API_URL}/equipes/ativa`);
+            const equipeAtiva = equipeResponse.data;
+
+            if (!equipeAtiva || !equipeAtiva.id) {
+                throw new Error('Equipe não encontrada');
+            }
+
+            console.log('=== SALVANDO DESMOBILIZAÇÃO COMPLETA ===');
+            console.log('inicio:', inicio);
+            console.log('fim:', fim);
+            console.log('tempoSegundos:', tempoSegundos);
+
+            const data = {
+                equipe_id: equipeAtiva.id,
+                hora_inicio_desmobilizacao: inicio.toISOString(),
+                hora_fim_desmobilizacao: fim.toISOString(),
+                tempo_desmobilizacao: tempoSegundos,
+                observacoes: observacoesDesmobilizacao || ''
+            };
+
+            console.log('Dados enviados para desmobilização:', JSON.stringify(data, null, 2));
+
+            const response = await axios.post(`${API_URL}/desmobilizacoes`, data);
+            console.log('Resposta do backend (desmobilização):', JSON.stringify(response.data, null, 2));
+
+            return response.data;
+        } catch (error) {
+            console.error('Erro ao salvar desmobilização completa:', error);
+            throw error;
+        }
     };
 
     // Resumo para exibir no final

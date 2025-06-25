@@ -1421,16 +1421,16 @@ app.get('/abastecimentos/:id', (req, res) => {
 
 // POST - Salvar mobilização
 app.post('/mobilizacoes', verificarEquipeAtiva, (req, res) => {
-    const { operacao_id, equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes } = req.body;
+    console.log('POST /mobilizacoes', req.body);
+    const { equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes } = req.body;
     const query = `
         INSERT INTO mobilizacoes 
-        (operacao_id, equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes)
-        VALUES (?, ?, ?, ?, ?, ?)
+        (equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes)
+        VALUES (?, ?, ?, ?, ?)
     `;
     connection.query(
         query,
         [
-            operacao_id,
             equipe_id,
             hora_inicio_mobilizacao,
             hora_fim_mobilizacao,
@@ -1442,7 +1442,35 @@ app.post('/mobilizacoes', verificarEquipeAtiva, (req, res) => {
                 console.error('Erro ao salvar mobilização:', err);
                 return res.status(500).json({ error: 'Erro ao salvar mobilização' });
             }
-            res.status(201).json({ id: result.insertId, operacao_id, equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes });
+            res.status(201).json({ id: result.insertId, equipe_id, hora_inicio_mobilizacao, hora_fim_mobilizacao, tempo_mobilizacao, observacoes });
+        }
+    );
+});
+
+// POST - Salvar desmobilização
+app.post('/desmobilizacoes', verificarEquipeAtiva, (req, res) => {
+    console.log('POST /desmobilizacoes', req.body);
+    const { equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes } = req.body;
+    const query = `
+        INSERT INTO desmobilizacoes 
+        (equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes) 
+        VALUES (?, ?, ?, ?, ?)
+    `;
+    connection.query(
+        query,
+        [
+            equipe_id,
+            hora_inicio_desmobilizacao,
+            hora_fim_desmobilizacao,
+            tempo_desmobilizacao,
+            observacoes
+        ],
+        (err, result) => {
+            if (err) {
+                console.error('Erro ao salvar desmobilização:', err);
+                return res.status(500).json({ error: 'Erro ao salvar desmobilização' });
+            }
+            res.status(201).json({ id: result.insertId, equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes });
         }
     );
 });
@@ -1463,34 +1491,6 @@ app.get('/mobilizacoes', (req, res) => {
         }
         res.json(results);
     });
-});
-
-// POST - Salvar desmobilização
-app.post('/desmobilizacoes', verificarEquipeAtiva, (req, res) => {
-    const { operacao_id, equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes } = req.body;
-    const query = `
-        INSERT INTO desmobilizacoes 
-        (operacao_id, equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes) 
-        VALUES (?, ?, ?, ?, ?, ?)
-    `;
-    connection.query(
-        query,
-        [
-            operacao_id,
-            equipe_id,
-            hora_inicio_desmobilizacao,
-            hora_fim_desmobilizacao,
-            tempo_desmobilizacao,
-            observacoes
-        ],
-        (err, result) => {
-            if (err) {
-                console.error('Erro ao salvar desmobilização:', err);
-                return res.status(500).json({ error: 'Erro ao salvar desmobilização' });
-            }
-            res.status(201).json({ id: result.insertId, operacao_id, equipe_id, hora_inicio_desmobilizacao, hora_fim_desmobilizacao, tempo_desmobilizacao, observacoes });
-        }
-    );
 });
 
 // GET - Buscar desmobilizações por operação
@@ -1524,3 +1524,8 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
 });
+
+// Atualizar mobilização para nova operação (exemplo de query SQL)
+// UPDATE mobilizacoes
+// SET operacao_id = <ID_DA_OPERACAO>
+// WHERE id = 1;

@@ -40,7 +40,9 @@ export default function ResumoAtividadesScreen({ navigation }) {
         { id: 'deslocamentos', nome: 'Deslocamentos', ativo: false },
         { id: 'aguardos', nome: 'Aguardos', ativo: false },
         { id: 'refeicoes', nome: 'Refeições', ativo: false },
-        { id: 'abastecimentos', nome: 'Abastecimentos', ativo: false }
+        { id: 'abastecimentos', nome: 'Abastecimentos', ativo: false },
+        { id: 'mobilizacoes', nome: 'Mobilizações', ativo: false },
+        { id: 'desmobilizacoes', nome: 'Desmobilizações', ativo: false }
     ]);
 
     // Carregar dados iniciais
@@ -162,34 +164,108 @@ export default function ResumoAtividadesScreen({ navigation }) {
                     cor: ab.tipo_abastecimento === 'AGUA' ? '#2196F3' : '#FF9800',
                     tempo: ab.tempo_abastecimento
                 })),
-                ...(mobilizacoesRes.data || []).map(mob => ({
-                    ...mob,
-                    tipo: 'mobilizacao',
-                    data: new Date(mob.data_inicio),
-                    dataString: new Date(mob.data_inicio).toLocaleDateString(),
-                    titulo: `Mobilização`,
-                    descricao: mob.observacoes || '',
-                    status: mob.data_fim ? 'FINALIZADO' : 'EM_ANDAMENTO',
-                    icone: 'construct',
-                    cor: '#1976D2',
-                    tempo: mob.data_fim && mob.data_inicio ? Math.floor((new Date(mob.data_fim) - new Date(mob.data_inicio)) / 1000) : 0
-                })),
-                ...(desmobilizacoesRes.data || []).map(desm => ({
-                    ...desm,
-                    tipo: 'desmobilizacao',
-                    data: new Date(desm.data_inicio),
-                    dataString: new Date(desm.data_inicio).toLocaleDateString(),
-                    titulo: `Desmobilização`,
-                    descricao: desm.observacoes || '',
-                    status: desm.data_fim ? 'FINALIZADO' : 'EM_ANDAMENTO',
-                    icone: 'exit',
-                    cor: '#E65100',
-                    tempo: desm.data_fim && desm.data_inicio ? Math.floor((new Date(desm.data_fim) - new Date(desm.data_inicio)) / 1000) : 0
-                }))
+                ...(mobilizacoesRes.data || []).map(mob => {
+                    console.log('Mobilização encontrada:', mob);
+                    console.log('Tempo do banco (tempo_mobilizacao):', mob.tempo_mobilizacao);
+                    console.log('Hora início:', mob.hora_inicio_mobilizacao);
+                    console.log('Hora fim:', mob.hora_fim_mobilizacao);
+
+                    // Verificar se o tempo_mobilizacao é um timestamp Unix (muito grande) ou segundos de duração
+                    let tempoCalculado = 0;
+                    if (mob.tempo_mobilizacao) {
+                        // Se o tempo for maior que 1000000, provavelmente é um timestamp Unix
+                        if (mob.tempo_mobilizacao > 1000000) {
+                            console.log('Tempo parece ser timestamp Unix, calculando diferença...');
+                            if (mob.hora_inicio_mobilizacao && mob.hora_fim_mobilizacao) {
+                                tempoCalculado = Math.floor((new Date(mob.hora_fim_mobilizacao) - new Date(mob.hora_inicio_mobilizacao)) / 1000);
+                            }
+                        } else {
+                            // É segundos de duração normal
+                            tempoCalculado = mob.tempo_mobilizacao;
+                        }
+                    } else if (mob.hora_inicio_mobilizacao && mob.hora_fim_mobilizacao) {
+                        // Calcular se não tiver tempo no banco
+                        tempoCalculado = Math.floor((new Date(mob.hora_fim_mobilizacao) - new Date(mob.hora_inicio_mobilizacao)) / 1000);
+                        console.log('Tempo calculado:', tempoCalculado);
+                    }
+
+                    // Converter para hora local
+                    const dataInicio = mob.hora_inicio_mobilizacao ? new Date(mob.hora_inicio_mobilizacao) : new Date(mob.criado_em);
+                    const dataFim = mob.hora_fim_mobilizacao ? new Date(mob.hora_fim_mobilizacao) : null;
+
+                    return {
+                        ...mob,
+                        tipo: 'mobilizacao',
+                        data: dataInicio,
+                        dataString: dataInicio.toLocaleDateString(),
+                        titulo: `Mobilização`,
+                        descricao: mob.observacoes || 'Equipamento montado',
+                        status: mob.hora_fim_mobilizacao ? 'FINALIZADO' : 'EM_ANDAMENTO',
+                        icone: 'construct',
+                        cor: '#1976D2',
+                        tempo: tempoCalculado,
+                        hora_inicio_local: dataInicio.toLocaleTimeString(),
+                        hora_fim_local: dataFim ? dataFim.toLocaleTimeString() : null
+                    };
+                }),
+                ...(desmobilizacoesRes.data || []).map(desm => {
+                    console.log('Desmobilização encontrada:', desm);
+                    console.log('Tempo do banco (tempo_desmobilizacao):', desm.tempo_desmobilizacao);
+                    console.log('Hora início:', desm.hora_inicio_desmobilizacao);
+                    console.log('Hora fim:', desm.hora_fim_desmobilizacao);
+
+                    // Verificar se o tempo_desmobilizacao é um timestamp Unix (muito grande) ou segundos de duração
+                    let tempoCalculado = 0;
+                    if (desm.tempo_desmobilizacao) {
+                        // Se o tempo for maior que 1000000, provavelmente é um timestamp Unix
+                        if (desm.tempo_desmobilizacao > 1000000) {
+                            console.log('Tempo parece ser timestamp Unix, calculando diferença...');
+                            if (desm.hora_inicio_desmobilizacao && desm.hora_fim_desmobilizacao) {
+                                tempoCalculado = Math.floor((new Date(desm.hora_fim_desmobilizacao) - new Date(desm.hora_inicio_desmobilizacao)) / 1000);
+                            }
+                        } else {
+                            // É segundos de duração normal
+                            tempoCalculado = desm.tempo_desmobilizacao;
+                        }
+                    } else if (desm.hora_inicio_desmobilizacao && desm.hora_fim_desmobilizacao) {
+                        // Calcular se não tiver tempo no banco
+                        tempoCalculado = Math.floor((new Date(desm.hora_fim_desmobilizacao) - new Date(desm.hora_inicio_desmobilizacao)) / 1000);
+                        console.log('Tempo calculado:', tempoCalculado);
+                    }
+
+                    // Converter para hora local
+                    const dataInicio = desm.hora_inicio_desmobilizacao ? new Date(desm.hora_inicio_desmobilizacao) : new Date(desm.criado_em);
+                    const dataFim = desm.hora_fim_desmobilizacao ? new Date(desm.hora_fim_desmobilizacao) : null;
+
+                    return {
+                        ...desm,
+                        tipo: 'desmobilizacao',
+                        data: dataInicio,
+                        dataString: dataInicio.toLocaleDateString(),
+                        titulo: `Desmobilização`,
+                        descricao: desm.observacoes || 'Equipamento desmontado',
+                        status: desm.hora_fim_desmobilizacao ? 'FINALIZADO' : 'EM_ANDAMENTO',
+                        icone: 'exit',
+                        cor: '#E65100',
+                        tempo: tempoCalculado,
+                        hora_inicio_local: dataInicio.toLocaleTimeString(),
+                        hora_fim_local: dataFim ? dataFim.toLocaleTimeString() : null
+                    };
+                })
             ];
 
             // Ordenar por data mais recente
             todasAtividades.sort((a, b) => b.data - a.data);
+            console.log('Total de atividades carregadas:', todasAtividades.length);
+            console.log('Tipos de atividades:', todasAtividades.map(a => a.tipo));
+
+            // Contar quantos registros de cada tipo
+            const contagem = {};
+            todasAtividades.forEach(atividade => {
+                contagem[atividade.tipo] = (contagem[atividade.tipo] || 0) + 1;
+            });
+            console.log('Contagem por tipo:', contagem);
+
             setAtividades(todasAtividades);
         } catch (err) {
             // Só exibe erro se não for 404
@@ -247,6 +323,8 @@ export default function ResumoAtividadesScreen({ navigation }) {
             if (tipoAtivo.id === 'aguardos' && atividade.tipo !== 'aguardo') return false;
             if (tipoAtivo.id === 'refeicoes' && atividade.tipo !== 'refeicao') return false;
             if (tipoAtivo.id === 'abastecimentos' && atividade.tipo !== 'abastecimento') return false;
+            if (tipoAtivo.id === 'mobilizacoes' && atividade.tipo !== 'mobilizacao') return false;
+            if (tipoAtivo.id === 'desmobilizacoes' && atividade.tipo !== 'desmobilizacao') return false;
         }
 
         return true;
@@ -428,9 +506,15 @@ export default function ResumoAtividadesScreen({ navigation }) {
                         case 'abastecimento':
                             return { inicio: a.inicio_abastecimento, fim: a.fim_abastecimento };
                         case 'mobilizacao':
-                            return { inicio: a.hora_inicio, fim: a.hora_fim };
+                            return {
+                                inicio: a.hora_inicio_local || new Date(a.hora_inicio_mobilizacao).toLocaleTimeString(),
+                                fim: a.hora_fim_local || (a.hora_fim_mobilizacao ? new Date(a.hora_fim_mobilizacao).toLocaleTimeString() : null)
+                            };
                         case 'desmobilizacao':
-                            return { inicio: a.hora_inicio, fim: a.hora_fim };
+                            return {
+                                inicio: a.hora_inicio_local || new Date(a.hora_inicio_desmobilizacao).toLocaleTimeString(),
+                                fim: a.hora_fim_local || (a.hora_fim_desmobilizacao ? new Date(a.hora_fim_desmobilizacao).toLocaleTimeString() : null)
+                            };
                         default:
                             return { inicio: a.data, fim: null };
                     }
@@ -450,21 +534,21 @@ export default function ResumoAtividadesScreen({ navigation }) {
                         </thead>
                         <tbody>
                             ${atividades.map(a => {
-                                const { inicio, fim } = getInicioFim(a);
-                                return `
+                    const { inicio, fim } = getInicioFim(a);
+                    return `
                                     <tr>
-                                        <td>${inicio ? new Date(inicio).toLocaleString() : '-'}</td>
-                                        <td>${fim ? new Date(fim).toLocaleString() : '-'}</td>
+                                        <td>${inicio ? (typeof inicio === 'string' ? inicio : new Date(inicio).toLocaleString()) : '-'}</td>
+                                        <td>${fim ? (typeof fim === 'string' ? fim : new Date(fim).toLocaleString()) : '-'}</td>
                                         <td>
                                             <strong>${a.titulo}</strong>
                                             <div class="descricao">${a.descricao}</div>
                                         </td>
                                         <td>${a.status === 'EM_ANDAMENTO' ? 'Em andamento' :
-                                            a.status === 'FINALIZADO' ? 'Finalizado' : a.status}</td>
+                            a.status === 'FINALIZADO' ? 'Finalizado' : a.status}</td>
                                         <td>${a.tempo ? formatarTempo(a.tempo) : '-'}</td>
                                     </tr>
                                 `;
-                            }).join('')}
+                }).join('')}
                         </tbody>
                     </table>
                 </div>`;
@@ -895,14 +979,6 @@ export default function ResumoAtividadesScreen({ navigation }) {
             >
                 <Ionicons name="share-outline" size={24} color="#FFF" />
             </TouchableOpacity>
-
-            {/* Botão flutuante para filtros avançados */}
-            <TouchableOpacity
-                style={[styles.botaoFlutuanteSecundario]}
-                onPress={() => {/* Implementar filtros avançados */ }}
-            >
-                <Ionicons name="filter-outline" size={24} color="#FFF" />
-            </TouchableOpacity>
         </View>
     );
 }
@@ -1160,23 +1236,6 @@ const styles = StyleSheet.create({
         height: 56,
         borderRadius: 28,
         backgroundColor: '#4CAF50',
-        justifyContent: 'center',
-        alignItems: 'center',
-        elevation: 6,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 3,
-        zIndex: 999,
-    },
-    botaoFlutuanteSecundario: {
-        position: 'absolute',
-        right: 20,
-        bottom: 86, // Posicionado acima do primeiro botão
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: '#2196F3',
         justifyContent: 'center',
         alignItems: 'center',
         elevation: 6,
